@@ -56,7 +56,7 @@ log = get_logger("git")
 # Identity markers: a commit only these histories contain.
 PROTECTED_REPOSITORIES: Mapping[str, str] = MappingProxyType(
     {
-        "siamang": "0b35527a17fadde1dac59d7bb152a8948f752218",  # Siamang root commit
+        "siamang": "5551d4bfdd472e4a1c294ee11eada938b020ef0d",  # Siamang root commit
     }
 )
 

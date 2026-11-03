@@ -288,7 +288,7 @@ merely sits in a directory under one, but is its **own** repository, is allowed.
 * Identity marker: a commit that only that history contains, listed in
   `PROTECTED_REPOSITORIES`. Git checks for it with
   `rev-parse --verify --quiet <sha>^{commit}` (lazy fetch disabled). Siamang's
-  marker is `0b35527a17fadde1dac59d7bb152a8948f752218` (root commit).
+  marker is `5551d4bfdd472e4a1c294ee11eada938b020ef0d` (root commit).
 * Clones and linked worktrees of these repositories contain the commit, so
   they are refused too. No path is hard-coded.
 * Path-level detection (`is_repository`, `repository_root`, `locate_path`)

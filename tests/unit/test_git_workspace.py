@@ -437,7 +437,7 @@ def test_remotes_are_local_metadata_with_credentials_removed(manager, registry, 
 
 def test_default_protected_markers():
     assert PROTECTED_REPOSITORIES == {
-        "siamang": "0b35527a17fadde1dac59d7bb152a8948f752218",
+        "siamang": "5551d4bfdd472e4a1c294ee11eada938b020ef0d",
     }
 
 
