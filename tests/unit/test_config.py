@@ -103,5 +103,23 @@ def test_example_config_is_valid():
 
 def test_describe_is_plain_data():
     d = describe(load_config(env={}))
-    assert set(d) == {"app", "storage", "logging", "contract", "router", "providers", "models", "agents"}
+    assert set(d) == {"app", "storage", "logging", "contract", "router", "sandbox", "providers", "models", "agents"}
     assert isinstance(d["storage"]["path"], str)
+
+
+def test_sandbox_is_off_by_default_and_configurable(tmp_path):
+    assert load_config(env={}).sandbox.enabled is False
+    file = tmp_path / "s.toml"
+    file.write_text('[sandbox]\nenabled = true\nimage = "python:3.12-slim"\ntest_command = "pytest -q"\ntimeout_secs = 60\n')
+    box = load_config(file, env={}).sandbox
+    assert box.enabled and box.timeout_secs == 60 and box.test_command == "pytest -q"
+    assert load_config(env={"SIAMANG_SANDBOX_CPUS": "2"}).sandbox.cpus == 2
+
+
+@pytest.mark.parametrize("body", ["enabled = true", 'runtime = "sh"', "verify_attempts = 9", "timeout_secs = 0",
+                                  'timeout_secs = "soon"'])
+def test_sandbox_config_is_validated(tmp_path, body):
+    file = tmp_path / "s.toml"
+    file.write_text("[sandbox]\n" + body + "\n")
+    with pytest.raises(ConfigError):
+        load_config(file, env={})

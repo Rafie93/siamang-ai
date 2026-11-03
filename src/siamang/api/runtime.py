@@ -44,7 +44,7 @@ from siamang.tasks import TaskEngine, TaskFailure, TaskResult
 from siamang.tasks.definition import TaskRequest
 
 from .codec import decode, encode
-from . import ci_repair
+from . import ci_repair, verify
 from .parallel import ONE_ROUND, QA_POLICY, INTEGRATION_REVIEW, INPUT_DESIGN_BYTES, SPEC_BYTES, Merged, PackageRun, PackageStopped, commit_groups, merge_patches
 from .store import RunStore, now
 
@@ -127,8 +127,9 @@ def _stored(row):
 
 
 class Runtime:
-    def __init__(self, settings, models=None, authors=None, repos=None):
+    def __init__(self, settings, models=None, authors=None, repos=None, verifier=None):
         self.settings = settings
+        self._verifier = verifier
         self._models = models
         self._authors = authors or {}
         self._repos = repos or RepoClient()
@@ -158,6 +159,22 @@ class Runtime:
         return pin.ci_repair if pin else ci_repair.DEFAULT_ATTEMPTS
 
     ci_repair_attempts = ci_repair.DEFAULT_ATTEMPTS
+
+    def verification(self):
+        """``(service, attempts)`` when the sandbox is on, else ``(None, 0)``. A test can inject its own service."""
+        if self._verifier is not None:
+            return self._verifier, verify.DEFAULT_ATTEMPTS
+        if self._models is not None:
+            return None, 0
+        from siamang.config import load_config
+        box = load_config(self.settings.config).sandbox
+        if not box.enabled:
+            return None, 0
+        from siamang.sandbox import CliContainerRuntime, SandboxPolicy, SandboxService
+        from siamang.verification import VerificationService, parse_command
+        policy = SandboxPolicy(box.image, timeout_secs=box.timeout_secs, memory_mb=box.memory_mb, cpus=box.cpus)
+        checks = [c for c in (parse_command('test', box.test_command), parse_command('build', box.build_command)) if c]
+        return VerificationService(SandboxService(CliContainerRuntime(box.runtime), policy), checks), box.verify_attempts
 
     def open(self):
         self.settings.database.parent.mkdir(parents=True, exist_ok=True)
@@ -413,11 +430,26 @@ class Runtime:
                         return
                     loop, analysis, programmer = delivered
                 else:
-                    loop = LoopService(engine, programmer, TrackedQA(engine), TrackedReviewer(engine)).run(
-                        LoopRequest(**ids, plan=plan, analysis=analysis,
-                                    input=design_input(design) | ({'project_spec': clip_bytes(spec)} if spec else {})
-                                    | ({'owner_conversation': conversation_tail(conversation)} if conversation else {})
-                                    | (ci_repair.failure_input(ci_repair.failed_jobs(failed_ci['runs']), failed_log) if failed_ci else {})))
+                    base_input = (design_input(design) | ({'project_spec': clip_bytes(spec)} if spec else {})
+                                  | ({'owner_conversation': conversation_tail(conversation)} if conversation else {})
+                                  | (ci_repair.failure_input(ci_repair.failed_jobs(failed_ci['runs']), failed_log) if failed_ci else {}))
+
+                    def run_loop(extra=None):
+                        return LoopService(engine, programmer, TrackedQA(engine), TrackedReviewer(engine)).run(
+                            LoopRequest(**ids, plan=plan, analysis=analysis, input=base_input | (extra or {})))
+
+                    loop = run_loop()
+                verifier, attempts = self.verification()
+                verification = None
+                if verifier is not None and loop.passed and loop.final_patch:
+                    for attempt in range(1, attempts + 2):
+                        phase('verifying', attempt)
+                        verification = verifier.verify(project.root_path, loop.final_patch.changes, verify.criteria_from(design))
+                        if verification.status != 'failed' or attempt > attempts or packages:
+                            break
+                        loop = run_loop(verify.failure_input(verification))
+                        if not (loop.passed and loop.final_patch):
+                            break
                 if str(loop.stop_reason) == 'programmer_waiting':
                     # The Programmer needs a decision: it reaches the owner, and the answer returns to it.
                     asked = programmer.last
@@ -445,25 +477,32 @@ class Runtime:
                 bundle = json.dumps({'version': 1, 'plan': encode(plan), 'analysis': encode(analysis),
                                      'loop': encode(loop)}, sort_keys=True, separators=(',', ':'))
                 seal = self._sign(run_id, task_id, bundle)
-                report = json.dumps(dict(plan=plan.to_dict(), analysis=analysis.to_dict(), loop=loop.to_dict()))
+                report = json.dumps(dict(plan=plan.to_dict(), analysis=analysis.to_dict(), loop=loop.to_dict(),
+                                        **(dict(verification=verification.to_dict()) if verification else {})))
                 with db.transaction():
                     if self._closing or engine.get(task_id).status == 'cancelled':
                         raise Stopped()
                     db.conn.execute('UPDATE api_runs SET bundle=?,bundle_seal=?,report=? WHERE run_id=?',
                                     (bundle, seal, report, run_id))
                     if str(loop.stop_reason) == 'programmer_failed':
-                        cause = str((programmer.last.error or {}).get('code', 'unknown'))
-                        engine.fail(task_id, TaskFailure('PROGRAMMER_FAILED', 'Programmer could not produce a proposal.',
-                                                         retryable=True, details={'cause': cause}))
+                        error = programmer.last.error or {}
+                        engine.fail(task_id, TaskFailure('PROGRAMMER_FAILED', 'Programmer could not produce a proposal.', retryable=True,
+                                                         details={'cause': str(error.get('code', 'unknown')),
+                                                                  'reason': str(error.get('message', ''))[:300]}))
                         store.update(run_id, state='failed', phase='failed')
                         return
                     silenced = ci_repair.silencing_reason(patch, project.root_path) if repair and loop.passed else None
-                    passed = loop.passed and not silenced
+                    unproven = verifier is not None and loop.passed and not (verification and verification.passed)
+                    passed = loop.passed and not silenced and not unproven
                     reason = 'approval_required' if passed else 'quality_gate'
                     if silenced:
                         store.add_message(task.project_id, task_id, 'lead', dict(
                             message='Perbaikan CI ini ditahan dan tidak dikirim, karena tampak menyembunyikan kegagalan.',
                             questions=[dict(question=silenced, options=[])]))
+                    elif unproven:
+                        store.add_message(task.project_id, task_id, 'lead', dict(
+                            message=verify.blocked_message(verification) if verification else 'Verifikasi tidak berjalan.',
+                            questions=[dict(question=b, options=[]) for b in (verification.blockers() if verification else [])]))
                     elif not loop.passed:
                         store.add_message(task.project_id, task_id, 'lead', dict(
                             message=f'QA dan Reviewer masih menahan hasil ini setelah {len(loop.iterations)} putaran. '

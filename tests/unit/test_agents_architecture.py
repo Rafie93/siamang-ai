@@ -75,7 +75,7 @@ def test_agents_do_not_depend_on_future_layers():
 
 def test_no_future_layers_or_specialized_agents_exist():
     for name in FUTURE:
-        if name == "api":  # Phase 20 transport; upstream imports remain forbidden
+        if name in ("api", "sandbox"):  # Phase 20 transport, Phase 25 sandbox; upstream imports remain forbidden
             continue
         if name in ("orchestrator", "planner", "analyst", "programmer", "qa", "reviewer", "approval"):  # Phases 12-19;
             # agents may not import them

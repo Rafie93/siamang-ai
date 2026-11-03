@@ -26,7 +26,7 @@ GIT_PKG = SRC / "git"
 CLIENT = GIT_PKG / "client.py"
 CLAUDE_CLI = SRC / "models" / "providers" / "claude_cli.py"
 REPO_CLIENT = SRC / "repos" / "client.py"
-PROCESS_BOUNDARIES = {"git/client.py", "models/providers/claude_cli.py", "repos/client.py"}
+PROCESS_BOUNDARIES = {"git/client.py", "models/providers/claude_cli.py", "repos/client.py", "sandbox/runtime.py"}
 SECRET = "ghp_GIT-ENV-SECRET-777"
 
 NETWORK_COMMANDS = ("push", "pull", "fetch", "clone", "ls-remote", "remote update", "remote show",

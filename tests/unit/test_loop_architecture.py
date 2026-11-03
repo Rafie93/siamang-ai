@@ -87,7 +87,7 @@ def test_no_reverse_or_circular_dependency():
 
 def test_no_future_layers_exist():
     for name in FUTURE:
-        if name == "api":  # Phase 20 transport; upstream imports remain forbidden
+        if name in ("api", "sandbox"):  # Phase 20 transport, Phase 25 sandbox; upstream imports remain forbidden
             continue
         assert not (SRC / name).exists(), name
         assert not (SRC / f"{name}.py").exists(), name

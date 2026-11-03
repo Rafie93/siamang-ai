@@ -46,6 +46,20 @@ name = "Local echo (wiring test)"
 # parallel = 3            # work packages at the same time (1-6); more uses subscription limits faster
 # ci_repair = 2           # times a failed build returns to the Programmer (0-3); 0 turns it off
 
+# Phase 25-26: run the project's tests and build in a container before a result may pass. Off by default.
+# Commands come from here, never from the repository. The container has no network and no secrets, so the image
+# must already hold the dependencies (pull it first: podman pull <image>).
+# [sandbox]
+# enabled = true
+# runtime = "podman"          # or "docker"
+# image = "python:3.12-slim"
+# test_command = "python -m pytest -q"
+# build_command = ""
+# timeout_secs = 300          # per command
+# memory_mb = 1024
+# cpus = 1
+# verify_attempts = 2         # times a failed check returns to the Programmer (0-3)
+
 # Models: one table per model; the table key is SIAMANG's model_id.
 # priority: lower = preferred. Capabilities: text_generation,
 # structured_output, tool_calling, vision, streaming, reasoning.

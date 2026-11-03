@@ -25,8 +25,8 @@ Tujuan akhir, prinsip, dan status komponen ada di [VISION.md](VISION.md).
 | 22 | Uji pada proyek nyata | Berjalan; paket paralel belum pernah dipakai pada task nyata |
 | 23 | Event System (WebSocket/SSE) | Belum |
 | 24 | Virtual Office | Berjalan, repo terpisah `siamang-virtual-office` |
-| **25** | **Execution Sandbox** | Belum |
-| **26** | **Verification Engine** | Belum |
+| **25** | **Execution Sandbox** | Selesai di kode; belum diuji dengan container nyata |
+| **26** | **Verification Engine** | Sebagian: test/build di sandbox sudah menentukan lulus; pencocokan acceptance criteria belum |
 | **27** | **Tool Executor** | Belum |
 | **28** | **Recovery Engine dan loop bertingkat** | Belum |
 | **29** | **Kebijakan otonomi berbasis risiko** | Belum |

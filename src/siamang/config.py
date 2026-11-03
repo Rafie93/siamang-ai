@@ -70,6 +70,21 @@ class RouterConfig:
 
 
 @dataclass(frozen=True)
+class SandboxConfig:
+    """Phase 25-26: where project code runs and which commands count as evidence. Off unless ``enabled``."""
+
+    enabled: bool = False
+    runtime: str = "podman"  # podman or docker
+    image: str = ""  # must already be present locally: the sandbox has no network to pull it
+    test_command: str = ""  # one command line, run without a shell
+    build_command: str = ""
+    timeout_secs: int = 300
+    memory_mb: int = 1024
+    cpus: int = 1
+    verify_attempts: int = 2  # times a failed verification returns to the Programmer (0-3)
+
+
+@dataclass(frozen=True)
 class ProviderConfig:
     type: str
     name: str = ""
@@ -105,6 +120,7 @@ class Config:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     contract: ContractConfig = field(default_factory=ContractConfig)
     router: RouterConfig = field(default_factory=RouterConfig)
+    sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     providers: Mapping[str, ProviderConfig] = field(default_factory=lambda: MappingProxyType({}))
     models: Mapping[str, ModelConfig] = field(default_factory=lambda: MappingProxyType({}))
     agents: Mapping[str, AgentConfig] = field(default_factory=lambda: MappingProxyType({}))
@@ -117,6 +133,7 @@ _SECTIONS: dict[str, type] = {
     "logging": LoggingConfig,
     "contract": ContractConfig,
     "router": RouterConfig,
+    "sandbox": SandboxConfig,
 }
 
 # Keyed-table sections: [<section>.<id>] -> entry dataclass.
@@ -298,6 +315,12 @@ def _coerce(name: str, default: Any, value: Any, base: Path | None, section: str
         if isinstance(value, str) and value.lower() in ("0", "false", "no", "off"):
             return False
         raise ConfigError(f"{name} must be a boolean, got {value!r}")
+    if isinstance(default, int):
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        raise ConfigError(f"{name} must be an integer, got {value!r}")
     if isinstance(default, str):
         if not isinstance(value, str):
             raise ConfigError(f"{name} must be a string, got {type(value).__name__}")
@@ -307,6 +330,16 @@ def _coerce(name: str, default: Any, value: Any, base: Path | None, section: str
 
 def validate_config(config: Config) -> None:
     """Raise :class:`ConfigError` if any value is out of range."""
+    box = config.sandbox
+    if box.runtime not in ("podman", "docker"):
+        raise ConfigError("sandbox.runtime must be podman or docker")
+    if box.enabled and not box.image.strip():
+        raise ConfigError("sandbox.image is required when the sandbox is enabled")
+    if not 0 <= box.verify_attempts <= 3:
+        raise ConfigError("sandbox.verify_attempts must be between 0 and 3")
+    for key in ("timeout_secs", "memory_mb", "cpus"):
+        if getattr(box, key) < 1:
+            raise ConfigError(f"sandbox.{key} must be at least 1")
     if not config.app.name.strip():
         raise ConfigError("app.name must not be empty")
     if config.app.environment not in ENVIRONMENTS:

@@ -102,8 +102,8 @@ Status per 3 November 2026, berdasarkan pembacaan kode dan dokumentasi.
 | Repository Manager | Sudah | Clone, branch, commit, PR ke `siamang/*`, baca CI | Akun per instalasi | 33 |
 | Context Manager | Sebagian | Pemilihan file dan anggaran konteks | Indeks kode dan memori antar-run | 31 |
 | Artifact Manager | Sebagian | Dokumen dan patch tersimpan dengan hash | Penyimpanan hasil build | 31 |
-| Execution Sandbox | Belum | Tidak ada isolasi eksekusi | Seluruhnya | 25 |
-| Verification Engine | Sebagian | QA statis, Reviewer, loop, bukti persetujuan, hasil CI GitHub | Eksekusi nyata milik Siamang, terutama untuk repo tanpa CI | 26 |
+| Execution Sandbox | Sebagian | Container podman/docker per perintah: tanpa jaringan, tanpa secret, batas waktu dan sumber daya ([SANDBOX.md](SANDBOX.md)) | Diuji dengan container nyata; belum dipakai agen (Phase 27) | 25 |
+| Verification Engine | Sebagian | QA statis, Reviewer, loop, bukti persetujuan, hasil CI GitHub, test/build di sandbox yang menentukan lulus | Pencocokan tiap acceptance criteria dengan sebuah check | 26 |
 | Recovery Engine | Sebagian | Deteksi run terputus, retry manual, paket perbaikan, CI gagal kembali ke Programmer dengan batas | Eskalasi, rollback, checkpoint | 28 |
 | Permission Manager | Sudah | Deny by default, izin per identitas, persetujuan dengan bukti asal-usul | Kebijakan berbasis risiko, login multi-user | 29, 33 |
 

@@ -69,7 +69,7 @@ def test_orchestrator_does_not_depend_on_future_layers():
 
 def test_no_future_layers_exist():
     for name in FUTURE:
-        if name == "api":  # Phase 20 transport; upstream imports remain forbidden
+        if name in ("api", "sandbox"):  # Phase 20 transport, Phase 25 sandbox; upstream imports remain forbidden
             continue
         if name in ("planner", "analyst", "programmer", "qa", "reviewer", "approval"):  # Phases 13-19; the orchestrator may not
             # import them

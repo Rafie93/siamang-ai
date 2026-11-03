@@ -97,7 +97,7 @@ def test_nothing_else_imports_the_programmer():
     # Phase 16: QA re-validates the Phase 15 domain (change, patch, safety, snapshot) as data and reads the
     # project only through ProjectSnapshot. It never imports or calls the Programmer service.
     # repos/workspace.py applies an approved patch and reads the Phase 15 domain as data.
-    assert users == {'api/codec.py','api/runtime.py','api/parallel.py', 'documents/packages.py', "repos/workspace.py", "cli/main.py", "cli/checks.py", "qa/checks.py", "qa/finding.py", "qa/policy.py",
+    assert users == {'api/codec.py','api/runtime.py','api/parallel.py', 'documents/packages.py', "repos/workspace.py", "sandbox/workspace.py", "cli/main.py", "cli/checks.py", "qa/checks.py", "qa/finding.py", "qa/policy.py",
                      "qa/request.py", "qa/result.py", "qa/service.py",
                      # Phase 17: the Reviewer re-validates the same domain as data and never reads the project.
                      "reviewer/checks.py", "reviewer/finding.py", "reviewer/policy.py", "reviewer/request.py",
@@ -119,7 +119,7 @@ def test_nothing_else_imports_the_programmer():
 
 def test_no_future_layers_exist():
     for name in FUTURE:
-        if name == "api":  # Phase 20 transport; upstream imports remain forbidden
+        if name in ("api", "sandbox"):  # Phase 20 transport, Phase 25 sandbox; upstream imports remain forbidden
             continue
         assert not (SRC / name).exists(), name
         assert not (SRC / f"{name}.py").exists(), name

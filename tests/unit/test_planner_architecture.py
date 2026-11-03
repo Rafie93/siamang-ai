@@ -83,7 +83,7 @@ def test_only_the_cli_and_analyst_import_the_planner():
 
 def test_no_future_layers_exist():
     for name in FUTURE:
-        if name == "api":  # Phase 20 transport; upstream imports remain forbidden
+        if name in ("api", "sandbox"):  # Phase 20 transport, Phase 25 sandbox; upstream imports remain forbidden
             continue
         if name in ("analyst", "programmer", "qa", "reviewer", "approval"):  # Phases 14-19; the planner may not import them
             continue
