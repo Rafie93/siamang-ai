@@ -1,0 +1,320 @@
+# SIAMANG HTTP API — Phase 20
+
+Implemented on 12 October 2026. The API is a separate optional FastAPI transport
+over the existing Python services. It produces engineering proposals, static QA,
+review, and explicit approval decisions. For GitHub projects an approved patch becomes a commit on the
+task's branch and a pull request. It never merges, runs project code, opens a shell, or deploys.
+
+## Install and start
+
+```sh
+.venv/bin/python -m pip install -e '.[dev,api]'
+.venv/bin/python -m siamang.api.main --port 8765
+# After reinstalling the package, the equivalent console entry point is siamang-api.
+```
+
+Python >= 3.11; macOS/Linux (the runtime uses a POSIX file lock). The entry point
+binds only `127.0.0.1`, with one worker and access logging disabled. Importing the
+core does not require FastAPI. API configuration is required before startup;
+missing credentials or a seal key fail closed, rather than starting anonymously.
+
+`SIAMANG_CONFIG` selects the usual TOML config. `SIAMANG_STORAGE_PATH` overrides
+the database path. The API adds versioned supplemental tables to the core SQLite
+database: `api_schema` (v3), `api_runs`, append-only `api_run_events`, `api_features`, `api_task_features`, `api_documents`, and `api_design_decisions`. Core
+schema remains v3 and lifecycle contract remains v0.2. Back up the database
+before first use on an existing installation. No user database was migrated as
+part of development or validation.
+
+### Server-owned authentication and authorization
+
+Each operator has a distinct randomly generated bearer token (at least 32
+characters, preferably `secrets.token_urlsafe(48)`). Store only its SHA256 digest
+in the server's identity configuration. Never place the token in a frontend
+bundle, source control, URL, or query string. Token possession authenticates the
+configured identity; this is local service authentication, not a multi-factor
+proof of a human's identity. Revocation/rotation takes effect on server restart.
+
+Set `SIAMANG_API_IDENTITIES` to a JSON object, for example (replace placeholders):
+
+```json
+{
+  "owner": {
+    "token_sha256": "<64 lowercase hex characters>",
+    "permissions": ["read", "submit", "run", "cancel", "retry", "approve"],
+    "projects": ["prj_replaceWithRegisteredProjectID"]
+  }
+}
+```
+
+Add `configure` to let an identity change which model an agent uses; nothing else needs it.
+
+Scopes are finite project IDs. An explicit server-owned `"*"` scope allows all
+projects, but there is no default wildcard or permission. Separate operator and
+approver credentials are supported and recommended when needed. HTTP bodies
+cannot contain `approver_id`, policy, seal key, permissions, or override fields.
+
+Set `SIAMANG_API_SEAL_KEY` to at least 32 bytes encoded as hex. Generate once with
+`secrets.token_hex(32)` and preserve it in a protected server configuration
+outside the repository. The same key is required after restart to verify saved
+evidence and decisions. Key replacement intentionally makes old evidence
+unusable. The key is never returned by any endpoint.
+
+Optionally set `SIAMANG_API_ORIGINS` to a JSON array of exact origins, e.g.
+`["http://localhost:5173"]`. Default: no cross-origin access. Wildcards are
+refused. All `/v0` endpoints require bearer authentication and their named
+permission. Errors have the form `{"error":{"code":"..."}}`; request input,
+token values, tracebacks, and raw domain exception messages are not echoed.
+Responses use `Cache-Control: no-store`. Remote exposure/TLS, OAuth, sessions,
+and rate limits are outside this local-first release.
+
+## Model configuration
+
+The bundled echo provider is never eligible for HTTP engineering runs and is
+never a fallback. Without a configured real provider, `POST .../run` returns
+503 `model_not_configured`, leaving the task queued.
+
+An Ollama adapter supports bounded, non-streaming `/api/chat` generation and
+`/api/tags` health checks. See [Ollama's chat contract](https://docs.ollama.com/api/chat).
+A `claude_cli` adapter uses the operator's own logged-in CLI. See docs/MODEL_LAYER.md.
+
+```toml
+[storage]
+path = "data/siamang.db"
+
+[providers.local]
+type = "ollama"
+base_url = "http://127.0.0.1:11434"
+timeout_secs = 120
+
+[models.engineering]
+provider = "local"
+provider_model = "REPLACE_WITH_AN_INSTALLED_OLLAMA_MODEL"
+capabilities = ["text_generation", "structured_output"]
+priority = 10
+```
+
+Choose a model actually installed on the operator's Ollama server. No model is
+downloaded automatically. HTTP is restricted to loopback; other origins require
+HTTPS. URL credentials, paths, query strings, fragments, redirects, and ambient
+HTTP proxies are refused/disabled. Generation is capped by timeout and response
+size. Ollama calls were tested using isolated responses, not a live LLM;
+inference quality and the user's model installation are not verified.
+
+## Agent documents and the design gate
+
+Each agent owes the outputs listed in `src/siamang/documents/catalog.py`, published by
+`GET /v0/capabilities` as `documents`. `GET /v0/tasks/{id}/documents` returns what the
+latest run recorded. Every document has a `source`:
+
+| source | Written by | Rule |
+|---|---|---|
+| `authored` | The agent's model, one call per stage, no tools | A draft or opinion, never evidence |
+| `derived` | Code, from deterministic pipeline results | Includes the QA and Review verdicts; a model cannot change them |
+| `measured` | Real execution only | No model is asked. Stays `not_run` until CI exists |
+
+`status` is `generated`, `not_applicable` (with a reason), `not_run`, `not_assigned`
+(the agent has no model in `[agents.*]`), or `failed` (with the error code).
+
+When `planner` or `analyst` has a model, a run stops after briefing, planning, and analysis
+with `wait_reason=design_approval`, before any code is proposed. `POST /v0/tasks/{id}/design-decision`
+(`approve` permission, body `{"decision", "reason"}`) records the decision with a digest of the
+documents, then resumes the same run or cancels the task. A model failure while writing the
+design fails the task. A failure while writing later documents is recorded, and the proposal
+continues to approval. The approved design reaches the Programmer clipped to its 7 KB input
+budget, most binding documents first. Model-written review documents are advisory: they do
+not yet feed the revision loop or block approval.
+
+## GitHub projects
+
+`POST /v0/projects` (`submit` permission and an unrestricted `*` scope; body `name`, `repository` as
+`owner/name` or a github.com URL) registers a project and clones it in the background into
+`<database dir>/workspaces/<project id>`, a directory Siamang owns. Write access is checked first.
+
+The Lead then reads a bounded view of the repository and asks what the work needs. The spec moves
+through `thinking`, `gathering`, `pending_approval`, `approved`, or `failed`. `POST .../intake/messages`
+answers, and `POST .../intake/approve` (`approve` permission) approves. Until then `POST /v0/tasks`
+returns 409 `spec_not_approved`. A later message reopens the spec and blocks new tasks until it is approved again.
+
+### The conversation before a task
+
+`POST /v0/projects/{id}/drafts` (`submit`; body `content`, optional `priority`, `feature_id`, `revises_task_id`) starts a
+conversation with the Lead, and no task exists yet. The draft moves through `thinking`, `need_answers`, `ready`, or `failed`.
+`POST .../drafts/{draft}/messages` answers or corrects, and `POST .../drafts/{draft}/discard` drops it.
+`GET .../drafts` lists open drafts. When the Lead understands the work it writes a brief, and
+`POST .../drafts/{draft}/confirm` turns that brief into the task and starts it, reporting `scheduled` and `reason`
+(for example `worker_busy`). Confirming twice returns the same task. Such a task skips the Lead's question round at run
+start. `POST /v0/tasks` stays available for an instruction that needs no conversation.
+
+### Several Programmers on one task
+
+After the design documents, the Analyst's model may divide the work in `work_packages` (a document bound to the design
+approval): one foundation that runs first and alone, then packages that run at the same time, up to `parallel` in
+`[agents.programmer]` (default 3, at most 6). A package owns its paths exclusively, and a stack still undecided becomes a
+question to the owner before the design can be approved. Each package works on its own copy of the repository without
+`.git`, through the normal Programmer, QA, and Reviewer loop; a change outside its paths is told once and then stopped. A package that
+stops keeps the others' work, and the owner's answer runs only what has not passed. The patches then merge, and the same QA
+and Reviewer check the whole once, with one automatic repair package if they hold it. That merged result is the
+evidence the unchanged approval seals, published as one pull request with one commit per package. `task.packages` reports each package.
+The division can name a new application's expected findings as notes through the Reviewer's `advisory_codes`, limited to a code-owned
+allowlist that excludes security, QA, and patch findings, and recorded with the review so approval re-derives them.
+
+Work that fits one area stays with one Programmer. A repository with no branch gets one commit with a README on `main` as the base a pull
+request needs, the only push that ever reaches a default branch, and only while `git ls-remote` shows no branch.
+
+### CI
+
+After a push, `task.ci` follows the commit's GitHub Actions runs: `watching`, `success`, `failed` with the failed log (redacted), `none` when no
+workflow ran within two minutes, or `timeout`. Jobs and artifact names and sizes come only from GitHub's report, and fill the
+`measured` documents `ci_results` and `build_artifacts`. Artifacts stay on GitHub, reachable from the run page.
+
+### When a run stops
+
+Each task gets a `siamang/*` branch. A run that stops short of an approval says why, and
+`POST /v0/tasks/{id}/messages` resumes it with `wait_reason` `clarification_required`, `quality_gate`,
+`worker_interrupted`, or the legacy `input_required`. A Programmer question becomes a Lead message. `quality_gate` adds a
+message listing what QA and the Reviewer still hold. Once the design is approved a resume goes straight back to coding; an
+earlier stop goes through the design again. No agent writes closing documents when no patch exists. The Lead asks at most
+twice per task.
+
+The runtime selects the files the Programmer reads from the tracked list: every source file when there are at most 8, otherwise the
+Analyst's model picks from that list, falling back to files the design names. This reaches the Analyst as an in-process `focus` that
+`AnalysisRequest.from_dict` refuses, so an API caller still cannot choose files, and the Analyst and Programmer re-check each path.
+
+After final approval the patch from
+the sealed evidence is written to the clone only if every file still matches what the Programmer saw, committed, pushed, and
+offered as a pull request. `task.branch.publication` is `none`, `publishing`, `published`, or `failed`;
+`POST /v0/tasks/{id}/publish` retries a failure and does not repeat a commit that already reached the branch.
+
+`revises_task_id` on `POST /v0/tasks` joins the base task's branch while its pull request is open.
+After a merge or close, the revision uses its own branch from the default branch.
+
+Guarantees from `siamang.repos.client`: pushes reach only `siamang/*` branches, never force, and never merge. Agent
+documents and the spec stay in Siamang's database. The pull request carries the task text, patch
+summary, file list, and static check status, so those are visible to anyone who can see the repository.
+`patch_application: false` in capabilities still means nothing is applied to a registered local folder or a default branch.
+
+## Features and portfolio
+
+| Route | Permission | Purpose |
+|---|---|---|
+| `GET /v0/office` | read | Every active project with its active and three latest finished tasks, plus `current`, the task the worker is on |
+| `GET /v0/portfolio` | read | Every project in scope with task counts, waiting reasons, features, repository, and spec state |
+| `GET /v0/projects/{id}/features` | read | Features of a project |
+| `POST /v0/projects/{id}/features` | submit | Create a feature (`title`, optional `description`) |
+
+`POST /v0/tasks` accepts an optional `feature_id` of the same project.
+
+## Lifecycle, execution stage, and evidence
+
+Lifecycle remains `queued`, `running`, `waiting`, `completed`, `failed`,
+`cancelled`. Task Engine still manages state only. The API runtime owns the
+proposal workflow, calling the existing Planner, Analyst, and bounded Loop.
+
+Task snapshots add `execution` with `run_id`, `state`, `phase`, `iteration`,
+`wait_reason`, `heartbeat_at`, `updated_at`, `created_at`, `activity_known`, and
+`stale` when a runtime record exists. Without a runtime record, `phase=null`,
+`state=unknown`, and `activity_known=false`; legacy `running` is never inferred
+to mean active programming. A runtime heartbeat updates every 3 seconds; beyond
+15 seconds it is stale and `activity_known=false`. Heartbeats show worker
+liveness, not model token progress or completed work.
+
+| Execution phase | Evidence/meaning |
+|---|---|
+| queued | An explicit run request was durably scheduled |
+| planning | Planner invocation entered |
+| analysis | Analyst invocation entered |
+| programming | Programmer invocation entered, with iteration number |
+| qa | Static QA invocation entered |
+| reviewing | Reviewer invocation entered |
+| awaiting_approval | Final loop passed; explicit human decision still required |
+| blocked | Quality gate failed/inconclusive, or Programmer needs input |
+| interrupted | Prior worker exited before finishing, or graceful shutdown interrupted a stage |
+| finished | Proposal approved; task result explicitly says patch_applied=false |
+| failed | Pipeline error was recorded, with safe failure details |
+| cancelled | Explicit operator cancellation or authorized proposal rejection |
+
+`wait_reason` differentiates `approval_required`, `quality_gate`, `input_required`,
+and `worker_interrupted`. Generic waiting tasks without a runtime record remain
+unknown. An active worker cannot be inferred from lifecycle alone.
+
+No work is automatically restarted. Startup marks runtime-owned scheduled/running
+attempts interrupted; running tasks move to waiting. Existing waiting approval
+evidence survives restart. A POSIX database lock prevents multiple API runtime
+processes from falsely treating one another's tasks as interrupted. One proposal
+job runs at a time; a busy worker returns 409. Submission and execution are
+separate operations. Cancellation is cooperative between stages: an already
+started model call may finish before the worker stops; its proposal is discarded.
+
+## Actual routes
+
+| Method | Route | Permission / behavior |
+|---|---|---|
+| GET | `/v0/health` | read; storage health/version and observation timestamp |
+| GET | `/v0/capabilities` | read; truthful model configuration, permissions, supported statuses |
+| GET | `/v0/settings/models` | read; each agent's model and what can be chosen: configured models plus the tags Ollama has installed, with `cloud` true when the model is not on this machine |
+| POST | `/v0/settings/models` | configure and an unrestricted `*` scope; body `agent`, `provider`, `provider_model`. Only an offered, available model is accepted. Edits the `SIAMANG_CONFIG` file in place, adding a `[models.*]` table for a new Ollama tag; the agent's next model call uses it, no restart |
+| GET | `/v0/openapi.json` | read; generated OpenAPI contract, bearer security scheme |
+| GET | `/v0/projects` | read; scoped registered projects, local root paths withheld |
+| GET | `/v0/projects/{project_id}` | read; scoped project |
+| GET | `/v0/tasks?project_id=...&status=...&limit=100&offset=0` | read; lifecycle + execution snapshots |
+| POST | `/v0/tasks` | submit; persist a task, no automatic execution |
+| GET | `/v0/tasks/{task_id}` | read; task and latest execution record |
+| GET | `/v0/tasks/{task_id}/events?after_seq=0&limit=100` | read; lifecycle envelope replay |
+| GET | `/v0/tasks/{task_id}/execution-events?after=0&limit=100` | read; persisted real stage transitions |
+| POST | `/v0/tasks/{task_id}/run` | run; schedule queued task, 202 after storage succeeds |
+| POST | `/v0/tasks/{task_id}/cancel` | cancel; explicit cooperative cancellation |
+| POST | `/v0/tasks/{task_id}/retry` | retry; counted requeue only, no execution |
+| GET | `/v0/tasks/{task_id}/reports` | read; plan, analysis, loop, patch, static QA, review |
+| GET | `/v0/approvals?project_id=...` | read; waiting proposals with complete evidence and eligibility |
+| POST | `/v0/approvals/{run_id}` | approve; explicit approve/reject through ApprovalService |
+
+List limits are 1–100. Polling/refresh is supported; no SSE/WebSocket or fake
+progress percentage is advertised. Lifecycle events use per-task `seq`; execution
+events have their own `position` cursor. Consumers must not merge these cursors.
+Reports are sanitized display data; their original sealed artifacts remain
+server-side. Missing artefacts are null/absent, not invented. Static QA/review
+`pass` does not claim runtime code correctness.
+
+Task submission body (strict, extra fields refused):
+
+```json
+{"project_id":"prj_example","description":"Describe the engineering task",
+ "request_id":"req_uniqueForThisSubmission","priority":"normal"}
+```
+
+Reuse `request_id` to retry the same submission; a duplicate returns the same
+task and `duplicate=true`. A changed project/description with that ID is refused.
+`source=api` is assigned by the server. Neither successful submission nor 202
+run acceptance means a proposal has completed.
+
+Approval body: `{"decision":"approve","reason":"Reviewed the evidence."}`
+or `{"decision":"reject","reason":"Explain rejection."}`. Reject requires a
+reason. There is no default decision or bypass. The server loads its own sealed
+artefacts, reconstructs only allowlisted dataclasses, and invokes the existing
+ApprovalService's revalidation, provenance checks, and static re-derivation.
+It never accepts a client-supplied patch, QA pass, reviewer result, or seal.
+
+Decision persistence and task transition share one transaction. Repeating the
+same decision/body by the same authenticated identity is idempotent; a different
+decision returns 409. Evidence and decision records have contextual HMACs using
+the persistent server key; altered/cross-run records are refused. This does not
+introduce a patch executor, expiry/consumption semantics for execution, or a claim
+that producer identity and on-disk before-state were proven by Approval.
+
+## Validation
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -p no:cacheprovider
+.venv/bin/python scripts/smoke_http.py
+```
+
+The real HTTP smoke starts/stops its own loopback server, uses a temporary
+database and generated test identity, and verifies health, unauthorized access,
+durable submission, queued status, fail-closed model readiness, and OpenAPI.
+API tests additionally exercise the real proposal chain with a scripted model,
+stage observation, cancellation, quality gates, explicit approval/rejection,
+restarts, tampering, project scope, bounded inputs, and idempotency. Mock model
+responses are confined to tests; production never injects them.
+
+Application startup/shutdown follows FastAPI's
+[lifespan mechanism](https://fastapi.tiangolo.com/advanced/events/).

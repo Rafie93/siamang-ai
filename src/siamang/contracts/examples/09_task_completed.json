@@ -1,0 +1,26 @@
+{
+  "contract_version": "0.1",
+  "type": "task.completed",
+  "event_id": "evt_01J9Z8Z0CB",
+  "request_id": "req_01J9Z8P2AA",
+  "task_id": "tsk_01J9Z8P5BB",
+  "seq": 11,
+  "timestamp": "2026-10-04T10:21:52Z",
+  "producer": "siamang",
+  "payload": {
+    "outcome": "success",
+    "summary": "Fitur inventory selesai. 12 test lulus, perubahan ada di branch siamang/tsk_01J9Z8P5BB.",
+    "result": {
+      "changes": {
+        "files_changed": 4,
+        "commits": 2,
+        "branch": "siamang/tsk_01J9Z8P5BB"
+      },
+      "tests": {
+        "passed": 12,
+        "failed": 0
+      }
+    },
+    "duration_secs": 412
+  }
+}

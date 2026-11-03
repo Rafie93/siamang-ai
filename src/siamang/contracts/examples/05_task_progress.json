@@ -1,0 +1,19 @@
+{
+  "contract_version": "0.1",
+  "type": "task.progress",
+  "event_id": "evt_01J9Z8T0C5",
+  "request_id": "req_01J9Z8P2AA",
+  "task_id": "tsk_01J9Z8P5BB",
+  "seq": 5,
+  "timestamp": "2026-10-04T10:18:00Z",
+  "producer": "siamang",
+  "payload": {
+    "summary": "Endpoint CRUD selesai, menjalankan test.",
+    "percent": 70,
+    "step": {
+      "index": 4,
+      "total": 5,
+      "title": "Tulis test"
+    }
+  }
+}

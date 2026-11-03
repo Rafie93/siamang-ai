@@ -1,0 +1,20 @@
+{
+  "contract_version": "0.1",
+  "type": "task.started",
+  "event_id": "evt_01J9Z8P5C2",
+  "request_id": "req_01J9Z8P2AA",
+  "task_id": "tsk_01J9Z8P5BB",
+  "seq": 2,
+  "timestamp": "2026-10-04T10:15:01Z",
+  "producer": "siamang",
+  "payload": {
+    "summary": "Mulai mengerjakan fitur inventory.",
+    "plan_outline": [
+      "Analisis struktur project",
+      "Buat model Barang",
+      "Buat endpoint CRUD",
+      "Tulis test",
+      "Review"
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "contract_version": "0.1",
+  "type": "task.request",
+  "event_id": "evt_01J9Z8P2A0",
+  "request_id": "req_01J9Z8P2AA",
+  "timestamp": "2026-10-04T10:15:00Z",
+  "producer": "web-client",
+  "payload": {
+    "instruction": "Tambahkan fitur inventory dengan CRUD barang",
+    "source": "api",
+    "project": {
+      "hint": "toko contoh"
+    },
+    "locale": "id-ID",
+    "requested_by": "owner",
+    "context": {
+      "utterance": "tambahkan fitur inventory di toko contoh",
+      "conversation": [
+        "Owner: project toko pakai Python kan?",
+        "Asisten: Ya, Python dengan SQLite."
+      ]
+    },
+    "constraints": {
+      "approval_policy": "ask_medium_and_above"
+    }
+  }
+}

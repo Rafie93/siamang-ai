@@ -1,0 +1,56 @@
+# Example Siamang configuration. Pass it with --config or SIAMANG_CONFIG.
+# Never put secrets here (Phase 3 has no secret settings).
+# Every key is optional; env vars SIAMANG_<SECTION>_<KEY> override this file.
+
+[app]
+name = "siamang"
+environment = "development"   # development | test | production
+
+[storage]
+path = "data/siamang.db"      # relative to this file's directory
+
+[logging]
+level = "INFO"                # DEBUG | INFO | WARNING | ERROR | CRITICAL
+console = true
+# file = "logs/siamang.jsonl" # JSON lines; omit to disable file logging
+
+[contract]
+version = "0.2"
+
+[router]
+health_check = true           # probe provider health while selecting a model
+
+# Providers: one table per provider instance. `type` selects the adapter.
+# Phase 06 ships only "echo" (local, deterministic, not an LLM).
+# Credentials: name the env var that holds the key (api_key_env); never put
+# the key itself in this file.
+[providers.local]
+type = "echo"
+name = "Local echo (wiring test)"
+# api_key_env = "SIAMANG_LOCAL_API_KEY"
+
+# Claude through your own logged-in `claude` CLI (subscription, personal use only):
+# [providers.claude]
+# type = "claude_cli"
+# timeout_secs = 300
+#
+# [models.claude-sonnet]
+# provider = "claude"
+# provider_model = "sonnet"   # or "opus", "haiku", or a full model ID
+# capabilities = ["text_generation", "structured_output"]
+# priority = 10
+
+# The model an agent uses (HTTP runs): lead, planner, analyst, programmer, qa, reviewer.
+# [agents.programmer]
+# model = "claude-sonnet"
+# parallel = 3            # work packages at the same time (1-6); more uses subscription limits faster
+
+# Models: one table per model; the table key is SIAMANG's model_id.
+# priority: lower = preferred. Capabilities: text_generation,
+# structured_output, tool_calling, vision, streaming, reasoning.
+[models.echo-small]
+provider = "local"
+display_name = "Echo (small)"
+capabilities = ["text_generation", "structured_output"]
+context_window = 4096
+priority = 100

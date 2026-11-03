@@ -1,0 +1,40 @@
+# Secrets / environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Runtime data (Siamang will own project/task state; never commit it)
+data/
+*.db
+*.sqlite
+*.sqlite3
+logs/
+
+# Model weights
+/models/
+*.gguf
+*.onnx
+*.pt
+
+# Editor / OS / tooling
+.DS_Store
+.idea/
+.vscode/
+.claude/
+build/
+dist/
+# Local API process ownership lock
+*.api.lock
+
+# Laptop-specific model configuration
+siamang.toml

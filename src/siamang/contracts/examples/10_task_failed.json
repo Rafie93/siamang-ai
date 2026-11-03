@@ -1,0 +1,19 @@
+{
+  "contract_version": "0.1",
+  "type": "task.failed",
+  "event_id": "evt_01J9Z8X0C9",
+  "request_id": "req_01J9Z8P2AA",
+  "task_id": "tsk_01J9Z8P5BB",
+  "seq": 9,
+  "timestamp": "2026-10-04T10:20:30Z",
+  "producer": "siamang",
+  "payload": {
+    "summary": "Maaf, test gagal setelah tiga kali perbaikan. Perubahan tidak diterapkan.",
+    "error": {
+      "code": "QA_FAILED",
+      "retryable": true,
+      "message": "tests/test_inventory.py::test_delete 3 failures"
+    },
+    "rolled_back": true
+  }
+}

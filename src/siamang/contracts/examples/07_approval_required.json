@@ -1,0 +1,27 @@
+{
+  "contract_version": "0.1",
+  "type": "approval.required",
+  "event_id": "evt_01J9Z8V0C7",
+  "request_id": "req_01J9Z8P2AA",
+  "task_id": "tsk_01J9Z8P5BB",
+  "seq": 6,
+  "timestamp": "2026-10-04T10:19:00Z",
+  "producer": "siamang",
+  "payload": {
+    "approval_id": "apr_01J9Z9",
+    "action": "apply_changes",
+    "risk": "medium",
+    "question": "Mengubah 4 file dan menambah 1 tabel database. Boleh dilanjutkan?",
+    "details": {
+      "files_changed": 4,
+      "diff_stat": "+212 -8",
+      "branch": "siamang/tsk_01J9Z8P5BB"
+    },
+    "allowed_channels": [
+      "web",
+      "text"
+    ],
+    "expires_at": "2026-10-04T10:25:00Z",
+    "default_on_timeout": "reject"
+  }
+}
