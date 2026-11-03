@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,6 +72,7 @@ def _check_base(base):
 class RepoClient:
     def __init__(self, *, remote='https://github.com/{}.git', protocol='https'):
         self._remote, self._protocol = remote, protocol
+        self._fetch_guard, self._fetch_locks = threading.Lock(), {}
 
     def _env(self):
         env = {k: os.environ[k] for k in ENV_ALLOWLIST if k in os.environ}
@@ -137,6 +139,42 @@ class RepoClient:
     def files(self, root, limit=300):
         return self._git('ls-files', '-z', cwd=root).split('\0')[:-1][:limit]
 
+    def _fetch(self, root, code):
+        # A task and the Lead share one clone, and two fetches at once can fail on a ref lock.
+        with self._fetch_guard:
+            lock = self._fetch_locks.setdefault(str(root), threading.Lock())
+        with lock:
+            self._git('fetch', '--prune', '--no-tags', 'origin', cwd=root, timeout=PUSH_TIMEOUT, code=code)
+
+    def refresh(self, root) -> bool:
+        """Update what the clone knows of the remote. Only remote refs move: the checkout a task uses stays."""
+        try:
+            self._fetch(root, 'fetch_failed')
+        except RepoError:
+            return False
+        return True
+
+    def revision(self, root, branch) -> str | None:
+        """The commit of a remote branch as last fetched, or None when the clone has no such branch."""
+        _check_base(branch)
+        try:
+            return self._git('rev-parse', '--verify', '--quiet', f'refs/remotes/origin/{branch}^{{commit}}', cwd=root).strip()
+        except RepoError:
+            return None
+
+    def tree(self, root, commit, limit=300) -> dict[str, str]:
+        """Each file of a commit with its Git mode, without touching the checkout."""
+        entries = {}
+        for line in self._git('ls-tree', '-r', '-z', commit, cwd=root).split('\0')[:-1]:
+            meta, name = line.split('\t', 1)
+            mode, kind, _ = meta.split(' ')
+            if kind == 'blob':
+                entries[name] = mode
+        return dict(list(entries.items())[:limit])
+
+    def blob(self, root, commit, name) -> str:
+        return self._git('cat-file', 'blob', f'{commit}:{name}', cwd=root)
+
     # -- branches --------------------------------------------------------------
 
     def prepare(self, root, branch, base):
@@ -146,7 +184,7 @@ class RepoClient:
         """
         _check_branch(branch)
         _check_base(base)
-        self._git('fetch', '--prune', '--no-tags', 'origin', cwd=root, timeout=PUSH_TIMEOUT, code='fetch_failed')
+        self._fetch(root, 'fetch_failed')
         refs = self._git('for-each-ref', '--format=%(refname:short)', 'refs/remotes/origin', cwd=root).split()
         start = f'origin/{branch}' if f'origin/{branch}' in refs else f'origin/{base}'
         if start not in refs:

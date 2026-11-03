@@ -5,6 +5,7 @@ Only GitHub's API is faked: clone, fetch, commit, and push run against a local b
 import hashlib
 import json
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from siamang.api.app import create_app, repository_name
 from siamang.api.runtime import RuntimeRefusal
 from siamang.api.settings import APISettings, Principal
 from siamang.repos.client import PullRequest, RepoClient, RepoError, RepoInfo
-from siamang.repos.workspace import branch_name, write_changes
+from siamang.repos.workspace import branch_name, read_latest, write_changes
 from tests.api.test_http import TOKENS, headers
 from tests.support.analyst import sample_project
 from tests.support.loop import CLEAN
@@ -553,3 +554,131 @@ def test_a_symlink_cannot_carry_a_write_out_of_the_clone(tmp_path):
 def test_branch_names_are_safe_for_any_text():
     assert branch_name('tsk_01ABCDEF', 'Buat Landing Page!! ../../etc') == 'siamang/buat-landing-page-etc-abcdef'
     assert branch_name('tsk_01ABCDEF', '日本語') == 'siamang/task-abcdef'
+
+
+def _clone_of(world, tmp_path):
+    root = tmp_path / 'managed'
+    world.github.clone(REPOSITORY, root)
+    return root
+
+
+def _push_to_main(world, tmp_path, name, content):
+    """Someone else adds work to the repository, as a merged pull request would."""
+    other = tmp_path / f'other-{name}'
+    git('clone', str(world.bare), str(other), cwd=tmp_path)
+    (other / name).write_text(content)
+    git('add', '-A', cwd=other)
+    git('commit', '-m', 'upstream', cwd=other)
+    git('push', 'origin', 'HEAD:main', cwd=other)
+    return git('rev-parse', 'HEAD', cwd=other)
+
+
+def test_latest_view_sees_new_commits_without_moving_the_checkout(world, tmp_path):
+    root = _clone_of(world, tmp_path)
+    world.github.prepare(root, 'siamang/old-task', 'main')
+    (root / 'task-only.txt').write_text('dari task lama')
+    git('add', '-A', cwd=root)
+    git('commit', '-m', 'task', cwd=root)
+    before = git('rev-parse', 'HEAD', cwd=root), git('status', '--porcelain', cwd=root), git('branch', '--show-current', cwd=root)
+    commit = _push_to_main(world, tmp_path, 'README.md', '# fitur baru dari main\n')
+
+    view = read_latest(world.github, root, 'main')
+
+    assert view['fetched_latest'] is True and view['revision'] == commit[:12]
+    assert 'fitur baru dari main' in view['file_samples']['README.md']
+    assert 'task-only.txt' not in view['tracked_files']
+    assert before == (git('rev-parse', 'HEAD', cwd=root), git('status', '--porcelain', cwd=root), git('branch', '--show-current', cwd=root))
+    assert 'fitur baru' not in (root / 'README.md').read_text()
+
+
+def test_latest_view_says_when_it_could_not_fetch(world, tmp_path):
+    root = _clone_of(world, tmp_path)
+    known = git('rev-parse', 'origin/main', cwd=root)
+    git('remote', 'set-url', 'origin', f'file://{tmp_path}/hilang.git', cwd=root)
+    view = read_latest(world.github, root, 'main')
+    assert view['fetched_latest'] is False and view['revision'] == known[:12] and view['tracked_files']
+
+
+def test_latest_view_redacts_and_does_not_follow_symlinks(world, tmp_path):
+    other = tmp_path / 'other'
+    git('clone', str(world.bare), str(other), cwd=tmp_path)
+    (other / 'README.md').unlink(missing_ok=True)
+    (other / 'README.md').symlink_to('/etc/hosts')
+    (other / 'package.json').write_text('{"token": "ghp_' + 'a' * 36 + '"}')
+    git('add', '-A', cwd=other)
+    git('commit', '-m', 'hostile', cwd=other)
+    git('push', 'origin', 'HEAD:main', cwd=other)
+    view = read_latest(world.github, _clone_of(world, tmp_path), 'main')
+    assert 'README.md' in view['tracked_files'] and 'README.md' not in view['file_samples']
+    assert 'ghp_' + 'a' * 36 not in view['file_samples']['package.json']
+
+
+def test_a_branch_view_falls_back_when_the_branch_is_gone(world, tmp_path):
+    root = _clone_of(world, tmp_path)
+    assert read_latest(world.github, root, 'main', 'siamang/sudah-dihapus')['revision'] == git('rev-parse', 'origin/main', cwd=root)[:12]
+
+
+def test_fetches_on_one_clone_never_overlap(world, tmp_path):
+    root = _clone_of(world, tmp_path)
+    running, peak, guard = [0], [0], threading.Lock()
+    real = world.github._git
+
+    def counting(*args, **kwargs):
+        if 'fetch' not in args:
+            return real(*args, **kwargs)
+        with guard:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        time.sleep(.02)
+        try:
+            return real(*args, **kwargs)
+        finally:
+            with guard:
+                running[0] -= 1
+
+    world.github._git = counting
+    threads = [threading.Thread(target=world.github.refresh, args=(root,)) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert peak[0] == 1
+
+
+def test_the_lead_reads_commits_pushed_after_the_clone(world, tmp_path):
+    with TestClient(world.app()) as client:
+        world.lead_replies[:0] = [QUESTIONS, READY]
+        project_id = client.post('/v0/projects', headers=headers(), json={'name': 'Landing', 'repository': REPOSITORY}).json()['project_id']
+        spec_state(client, project_id, 'gathering')
+        assert '"fitur-baru.txt"' not in world.lead.requests[0].messages[-1].content
+        commit = _push_to_main(world, tmp_path, 'fitur-baru.txt', 'baru')
+        assert client.post(f'/v0/projects/{project_id}/intake/messages', headers=headers(), json={'content': 'Ya'}).status_code == 202
+        spec_state(client, project_id, 'pending_approval')
+        seen = world.lead.requests[1].messages[-1].content
+        assert '"fitur-baru.txt"' in seen and commit[:12] in seen and '"fetched_latest": true' in seen
+
+
+def _lead_view_of_revision(client, world, project_id, task_id):
+    before = len(world.lead.requests)
+    world.lead_replies.append(QUESTIONS)
+    response = client.post(f'/v0/projects/{project_id}/drafts', headers=headers(),
+                           json={'content': 'Perbaiki lagi', 'revises_task_id': task_id})
+    assert response.status_code in (200, 201, 202), response.text
+    until(lambda: len(world.lead.requests) > before, 'lead turn')
+    return world.lead.requests[-1].messages[-1].content
+
+
+def test_a_revision_reads_its_open_pull_request_then_main_after_it_closes(world):
+    with TestClient(world.app()) as client:
+        project_id = new_project(client, world)
+        first = task(client, project_id)
+        branch = deliver(client, world, first)
+        commit = git('rev-parse', branch['branch'], cwd=world.bare)
+        main = git('rev-parse', 'main', cwd=world.bare)
+        assert commit != main
+
+        assert commit[:12] in _lead_view_of_revision(client, world, project_id, first)
+
+        pull = world.github.pulls[branch['branch']]
+        world.github.pulls[branch['branch']] = PullRequest(pull.number, pull.url, 'CLOSED')
+        assert main[:12] in _lead_view_of_revision(client, world, project_id, first)

@@ -15,6 +15,7 @@ CONTEXT_FILE_BYTES = 12_000
 NOT_SOURCE = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp', '.pdf', '.zip', '.gz', '.tar', '.mp3', '.mp4',
               '.woff', '.woff2', '.ttf', '.eot', '.otf', '.lock', '.min.js', '.min.css', '.map')
 GENERATED = ('package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'composer.lock', 'poetry.lock')
+SYMLINK_MODE = '120000'
 
 
 def _target(root: Path, path: str) -> Path:
@@ -68,6 +69,22 @@ def read_context(client, root) -> dict:
         if name in names and path.is_file() and not path.is_symlink():
             samples[name] = redact(path.read_bytes()[:CONTEXT_FILE_BYTES].decode('utf-8', 'replace'))
     return {'tracked_files': names, 'file_samples': samples}
+
+
+def read_latest(client, root, default_branch, branch=None) -> dict:
+    """What the Lead sees before a task runs: the remote's newest state, never whichever branch the clone is on.
+
+    A failed fetch still answers from the last known state, and says so.
+    """
+    root = Path(root)
+    fetched = client.refresh(root)
+    commit = (client.revision(root, branch) if branch else None) or client.revision(root, default_branch)
+    if commit is None:
+        return read_context(client, root) | {'fetched_latest': fetched, 'revision': None}
+    files = client.tree(root, commit)
+    samples = {name: redact(client.blob(root, commit, name).encode('utf-8', 'replace')[:CONTEXT_FILE_BYTES].decode('utf-8', 'replace'))
+               for name in CONTEXT_FILES if name in files and files[name] != SYMLINK_MODE}
+    return {'tracked_files': list(files), 'file_samples': samples, 'fetched_latest': fetched, 'revision': commit[:12]}
 
 
 def source_files(names) -> list[str]:

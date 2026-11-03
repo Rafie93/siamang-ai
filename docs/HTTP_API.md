@@ -129,6 +129,7 @@ not yet feed the revision loop or block approval.
 `POST /v0/projects` (`submit` permission and an unrestricted `*` scope; body `name`, `repository` as
 `owner/name` or a github.com URL) registers a project and clones it in the background into
 `<database dir>/workspaces/<project id>`, a directory Siamang owns. Write access is checked first.
+Each Lead turn, task start, and publication fetches first, so new commits on the repository are picked up without a manual pull.
 
 The Lead then reads a bounded view of the repository and asks what the work needs. The spec moves
 through `thinking`, `gathering`, `pending_approval`, `approved`, or `failed`. `POST .../intake/messages`

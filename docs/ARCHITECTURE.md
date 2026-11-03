@@ -107,6 +107,7 @@ folder kerja Anda.
 |---|---|
 | Lokasi | `<folder database>/workspaces/<project id>` |
 | Salinan paket paralel | `<folder database>/packages/<run id>`, tanpa `.git`, dihapus setelah selesai |
+| Saat Lead membaca repo | `fetch --prune`, lalu membaca objek Git `origin/<branch utama>`, tanpa mengubah folder kerja. Revisi dengan PR terbuka membaca branch PR itu |
 | Saat task mulai | `fetch --prune`, lalu pindah ke branch task dari `origin`, `reset --hard`, dan `clean -fdx` |
 | Saat publikasi | Clone disiapkan ulang dengan cara yang sama, lalu patch diterapkan, commit, dan push tanpa force |
 | Isi file berubah sejak patch dibuat | Publikasi gagal dengan `patch_stale`, tidak ada yang ditimpa |
@@ -115,9 +116,8 @@ folder kerja Anda.
 
 Batas yang diketahui:
 
-* Tidak ada sinkronisasi latar. Clone hanya diperbarui saat task berjalan dan saat publikasi.
-* Percakapan proyek dan percakapan sebelum task membaca clone apa adanya, tanpa `fetch`.
-  Isinya bisa tertinggal, atau berada di branch task terakhir.
+* Tidak ada sinkronisasi latar, karena tidak ada yang membaca clone di antara momen di atas.
+* Jika `fetch` Lead gagal, Lead memakai data terakhir dengan tanda `fetched_latest: false`.
 * Spesifikasi proyek yang sudah disetujui tidak diperbarui otomatis saat repo berubah.
 * Clone tidak pernah dibersihkan, karena project tidak bisa dihapus (P3).
 

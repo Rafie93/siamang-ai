@@ -32,7 +32,7 @@ from siamang.log import redact
 from siamang.models.errors import ModelError
 from siamang.programmer.policy import ProgrammingPolicy
 from siamang.repos.client import RepoClient, RepoError
-from siamang.repos.workspace import branch_name, named_in, read_context, source_files, write_changes
+from siamang.repos.workspace import branch_name, named_in, read_context, read_latest, source_files, write_changes
 from siamang.loop import LoopRequest, LoopService
 from siamang.planner import Planner, PlanningRequest
 from siamang.programmer import Programmer
@@ -779,7 +779,8 @@ class Runtime:
             project, spec = ProjectRegistry(db).get(project_id), store.spec(project_id)
             reply = ask_lead(router, INTAKE_PROMPT, dict(
                 project=dict(name=project.name, repository=store.repo(project_id)['repository']),
-                repository=read_context(self._repos, project.root_path), conversation=history,
+                repository=read_latest(self._repos, project.root_path, store.repo(project_id)['default_branch']),
+                conversation=history,
                 current_spec=spec['content'], rounds_left=max(MAX_INTAKE_ROUNDS - rounds, 0)))
         except (ModelError, RepoError) as exc:
             store.set_spec(project_id, state='failed', error=str(exc.code))
@@ -910,6 +911,18 @@ class Runtime:
             RunStore(db).add_draft_message(draft, 'owner', {'message': content}, state='thinking', error=None)
         self._submit_background(self._draft_turn, draft['draft_id'])
 
+    def _open_revision(self, store, repo, draft):
+        """The branch a revision will join: while its pull request is open, the newest work is there."""
+        revises = draft['options'].get('revises_task_id')
+        base = store.branch(revises) if revises else None
+        if not base:
+            return None
+        try:
+            pull = self._repos.find_pull_request(repo['repository'], base['branch'])
+        except RepoError:
+            return None
+        return base['branch'] if pull and pull.state == 'OPEN' else None
+
     def _draft_turn(self, draft_id):
         with Database(self.settings.database) as db:
             store = RunStore(db)
@@ -923,7 +936,8 @@ class Runtime:
                                else 'new', current_brief=draft['brief'], rounds_left=max(MAX_DRAFT_ROUNDS - rounds, 0))
                 if repo:
                     context |= dict(project_spec=(store.spec(project_id) or {}).get('content', ''),
-                                    repository=read_context(self._repos, project.root_path))
+                                    repository=read_latest(self._repos, project.root_path, repo['default_branch'],
+                                                           self._open_revision(store, repo, draft)))
                 reply = ask_lead(self.author('lead'), DRAFT_PROMPT, context)
                 if reply.ready and not reply.spec.strip():
                     raise RepoError('lead_returned_empty_brief')
