@@ -28,6 +28,8 @@ class FileChange:
     path: str
     operation: str  # create | modify | delete
     after_content: str | None = None
+    step_id: str = ""  # which plan step the change serves, when the agent said
+    reason: str = ""
 
 
 class ToolWorkspace:
@@ -101,7 +103,7 @@ class ToolWorkspace:
         listed = sorted(p for p in found if not prefix or p == prefix or p.startswith(prefix.rstrip("/") + "/"))
         return listed[:LIST_LIMIT]
 
-    def write(self, raw, content) -> str:
+    def write(self, raw, content, step_id="", reason="") -> str:
         path = self._path(raw)
         if not isinstance(content, str):
             raise ToolError("content must be a string")
@@ -114,7 +116,9 @@ class ToolWorkspace:
         existed = self.exists(path)
         self._claim(path)
         original = self._on_disk(path) is not None
-        self._edits[path] = FileChange(path, "modify" if original else "create", content)
+        self._edits[path] = FileChange(path, "modify" if original else "create", content,
+                                       step_id if isinstance(step_id, str) else "",
+                                       reason[:300] if isinstance(reason, str) else "")
         return "modified" if existed else "created"
 
     def delete(self, raw) -> str:

@@ -87,7 +87,9 @@ def violations(source: str, *, model_boundary: bool = False) -> set[str]:
         elif isinstance(node, ast.Attribute) and node.attr in FORBIDDEN_NAMES:
             found.add(node.attr)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            if node.func.attr in FORBIDDEN_CALLS:
+            # The one sanctioned execution seam: the injected ToolRunner (sandbox), reached only as ``self._tools``.
+            injected = isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "_tools"
+            if node.func.attr in FORBIDDEN_CALLS and not injected:
                 found.add(f"call:{node.func.attr}")
             if node.func.attr in MODEL_CALLS and not model_boundary:
                 found.add(f"call:{node.func.attr}")
@@ -100,7 +102,7 @@ def _strategy_generate_is_through_access(source: str) -> bool:
     """strategy.py may call ``models.generate`` (the access facade) and nothing else named generate/select."""
     calls = [n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
              and n.func.attr in MODEL_CALLS]
-    return all(isinstance(c.func.value, ast.Name) and c.func.value.id == "models" for c in calls) and len(calls) == 1
+    return all(isinstance(c.func.value, ast.Name) and c.func.value.id == "models" for c in calls) and len(calls) == 2  # ModelStrategy once; ToolStrategy once per turn (bounded by the access limit)
 
 
 @pytest.mark.parametrize("path", sorted(PROGRAMMER.glob("*.py")), ids=lambda p: p.name)

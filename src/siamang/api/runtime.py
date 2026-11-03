@@ -36,6 +36,8 @@ from siamang.repos.workspace import branch_name, named_in, read_context, read_la
 from siamang.loop import LoopRequest, LoopService
 from siamang.planner import Planner, PlanningRequest
 from siamang.programmer import Programmer
+from siamang.recovery import CheckpointStore, RecoveryEngine, RecoveryPolicy, Stage, StageOutcome
+from siamang.verification import VerificationReport
 from siamang.projects import ProjectRegistry
 from siamang.qa import QAService
 from siamang.reviewer import ReviewerService
@@ -44,7 +46,7 @@ from siamang.tasks import TaskEngine, TaskFailure, TaskResult
 from siamang.tasks.definition import TaskRequest
 
 from .codec import decode, encode
-from . import ci_repair, verify
+from . import ci_repair, recover, verify
 from .parallel import ONE_ROUND, QA_POLICY, INTEGRATION_REVIEW, INPUT_DESIGN_BYTES, SPEC_BYTES, Merged, PackageRun, PackageStopped, commit_groups, merge_patches
 from .store import RunStore, now
 
@@ -101,7 +103,7 @@ def _blockers(loop):
     return [f"{f.path or 'umum'}: {f.message} ({f.code})" for f in findings[:MAX_BLOCKERS]]
 
 
-def _pull_request_body(task, patch, loop):
+def _pull_request_body(task, patch, loop, debt=''):
     qa, review = loop.final_qa_result, loop.final_review_result
     files = '\n'.join(f'- `{c.path}` ({c.operation})' for c in patch.changes)
     return redact(f'''## Task
@@ -118,6 +120,7 @@ def _pull_request_body(task, patch, loop):
 - Reviewer: {review.status if review else 'tidak berjalan'} (pemeriksaan deterministik)
 - Siamang sendiri tidak menjalankan kode. Hasil build dan test nyata ada di tab Checks kalau repo punya workflow.
 
+{debt}
 Dibuat oleh Siamang setelah disetujui operator. Merge tetap keputusan pemilik repository.
 ''')
 
@@ -127,9 +130,11 @@ def _stored(row):
 
 
 class Runtime:
-    def __init__(self, settings, models=None, authors=None, repos=None, verifier=None):
+    def __init__(self, settings, models=None, authors=None, repos=None, verifier=None, tools=None, recovery=None):
         self.settings = settings
         self._verifier = verifier
+        self._tools = tools  # a ToolRunner for the Programmer; tests inject one
+        self._recovery = recovery  # a RecoveryPolicy; tests inject one
         self._models = models
         self._authors = authors or {}
         self._repos = repos or RepoClient()
@@ -175,6 +180,40 @@ class Runtime:
         policy = SandboxPolicy(box.image, timeout_secs=box.timeout_secs, memory_mb=box.memory_mb, cpus=box.cpus)
         checks = [c for c in (parse_command('test', box.test_command), parse_command('build', box.build_command)) if c]
         return VerificationService(SandboxService(CliContainerRuntime(box.runtime), policy), checks), box.verify_attempts
+
+    def tooling(self):
+        """The Programmer's tool runner when ``sandbox.tools`` is on, else ``None`` (the one-shot Programmer)."""
+        if self._tools is not None:
+            return self._tools
+        if self._models is not None:
+            return None
+        from siamang.config import load_config
+        box = load_config(self.settings.config).sandbox
+        if not (box.enabled and box.tools):
+            return None
+        from siamang.executor import ToolExecutor, ToolPolicy
+        from siamang.sandbox import CliContainerRuntime, SandboxPolicy, SandboxService
+        from .tooling import SandboxToolRunner
+        policy = SandboxPolicy(box.image, timeout_secs=box.timeout_secs, memory_mb=box.memory_mb, cpus=box.cpus)
+        sandbox = SandboxService(CliContainerRuntime(box.runtime), policy)
+        return SandboxToolRunner(ToolExecutor(sandbox, ToolPolicy(max_turns=box.tool_turns, max_runs=box.tool_runs)))
+
+    def programmer_options(self):
+        tools = self.tooling()
+        return dict(strategy='programming.tools', tools=tools) if tools else {}
+
+    def recovery(self):
+        """The recovery policy when ``[recovery] enabled``, else ``None`` (verify and retry as before)."""
+        if self._recovery is not None:
+            return self._recovery
+        if self._models is not None:
+            return None
+        from siamang.config import load_config
+        rec = load_config(self.settings.config).recovery
+        if not rec.enabled:
+            return None
+        return RecoveryPolicy(retries=rec.retries, advisor_rounds=rec.advisor_rounds, replans=rec.replans,
+                              max_attempts=rec.max_attempts)
 
     def open(self):
         self.settings.database.parent.mkdir(parents=True, exist_ok=True)
@@ -410,7 +449,8 @@ class Runtime:
                         self.last = super().program(request)
                         return self.last
 
-                programmer = TrackedProgrammer(engine, models=self.models('programmer'), policy=MODEL_POLICY)
+                programmer = TrackedProgrammer(engine, models=self.models('programmer'), policy=MODEL_POLICY,
+                                               **self.programmer_options())
 
                 class TrackedQA(QAService):
                     def verify(self, request):
@@ -438,10 +478,68 @@ class Runtime:
                         return LoopService(engine, programmer, TrackedQA(engine), TrackedReviewer(engine)).run(
                             LoopRequest(**ids, plan=plan, analysis=analysis, input=base_input | (extra or {})))
 
-                    loop = run_loop()
+                    recovery = self.recovery()
+                    loop = None if recovery else run_loop()
                 verifier, attempts = self.verification()
                 verification = None
-                if verifier is not None and loop.passed and loop.final_patch:
+                recovered = None
+                if not packages and recovery:
+                    checkpoint = CheckpointStore(self.settings.database.parent / 'checkpoints')
+                    key = self._checkpoint_key(task, spec, conversation, design)
+                    state = dict(loop=None, verification=None)
+
+                    def deliver(ctx):
+                        extra = {}
+                        previous = state['verification']
+                        if previous is not None and previous.status == 'failed':
+                            extra |= verify.failure_input(previous)
+                        if ctx.feedback:
+                            extra['recovery_feedback'] = ctx.feedback[:800]
+                        if ctx.approach:
+                            extra['recovery_approach'] = ctx.approach[:600]
+                        if ctx.subtask:
+                            extra['recovery_part'] = ctx.subtask[:200]
+                        state['verification'] = None
+                        state['loop'] = run = run_loop(extra)
+                        if str(run.stop_reason) == 'programmer_waiting':
+                            return StageOutcome(True, dict(waiting=True))
+                        if not (run.passed and run.final_patch):
+                            return StageOutcome(False, failure=('; '.join(_blockers(run)) or str(run.stop_reason))[:700])
+                        output = dict(loop=encode(run), plan=encode(plan), analysis=encode(analysis), verification=None)
+                        made = programmer.last.metadata if programmer.last else {}
+                        note = ('Programmer tidak menjalankan tes setelah edit terakhir; hanya verifikasi akhir yang '
+                                'menjalankannya.' if made.get('sandbox_mode') == 'finished' and not made.get('sandbox_verified') else '')
+                        if verifier is not None:
+                            phase('verifying', ctx.attempt)
+                            state['verification'] = report = verifier.verify(
+                                project.root_path, run.final_patch.changes, verify.criteria_from(design))
+                            output['verification'] = report.to_dict()
+                            if report.status == 'failed':
+                                return StageOutcome(False, failure=json.dumps(report.feedback())[:700])
+                        return StageOutcome(True, output, compromise=note)
+
+                    def replan(remaining, failure):
+                        def again(ctx):
+                            nonlocal plan, analysis
+                            text = (task.description + '\n\nPercobaan sebelumnya gagal: ' + failure)[:3_900]
+                            plan = Planner(engine).plan(PlanningRequest(**dict(ids, instruction=text)))
+                            analysis = SystemAnalyst(engine).analyze(AnalysisRequest(**ids, plan=plan, focus=focus))
+                            return deliver(ctx)
+                        return [Stage('deliver_replanned', again)]
+
+                    recovered = RecoveryEngine(
+                        advisor=recover.advisor(self.author('lead') or self.author('analyst'), task.description),
+                        replanner=replan, checkpoints=checkpoint, policy=recovery).run(
+                            key, [Stage('deliver', deliver)], keep_checkpoint=True)
+                    if recovered.resumed:
+                        saved = recovered.outputs[recovered.completed[-1]]
+                        loop, plan, analysis = decode(saved['loop']), decode(saved['plan']), decode(saved['analysis'])
+                        verification = VerificationReport.from_dict(saved['verification']) if saved['verification'] else None
+                    else:
+                        loop, verification = state['loop'], state['verification']
+                    if str(loop.stop_reason) == 'programmer_waiting':
+                        checkpoint.clear(key)
+                elif verifier is not None and loop.passed and loop.final_patch:
                     for attempt in range(1, attempts + 2):
                         phase('verifying', attempt)
                         verification = verifier.verify(project.root_path, loop.final_patch.changes, verify.criteria_from(design))
@@ -478,7 +576,8 @@ class Runtime:
                                      'loop': encode(loop)}, sort_keys=True, separators=(',', ':'))
                 seal = self._sign(run_id, task_id, bundle)
                 report = json.dumps(dict(plan=plan.to_dict(), analysis=analysis.to_dict(), loop=loop.to_dict(),
-                                        **(dict(verification=verification.to_dict()) if verification else {})))
+                                        **(dict(verification=verification.to_dict()) if verification else {}),
+                                        **(dict(recovery=recovered.to_dict()) if recovered else {})))
                 with db.transaction():
                     if self._closing or engine.get(task_id).status == 'cancelled':
                         raise Stopped()
@@ -511,6 +610,8 @@ class Runtime:
                     engine.wait(task_id, reason=reason)
                     store.update(run_id, state='waiting', phase='awaiting_approval' if passed else 'blocked',
                                  wait_reason=reason)
+                if recovered:
+                    checkpoint.clear(key)  # the result is saved: a later attempt must not reuse it
                 if repair and passed:
                     self._approve_repair(db, store, engine, run_id)
         except BaseException as exc:
@@ -535,6 +636,13 @@ class Runtime:
             if pulse.is_alive():
                 pulse.join()
             self._busy.release()
+
+    @staticmethod
+    def _checkpoint_key(task, spec, conversation, design):
+        """Same task with the same brief, owner answers, and design: a retry may reuse a finished delivery."""
+        brief = json.dumps([task.description, spec, conversation, [d.content for d in design]], sort_keys=True,
+                           default=str)
+        return f"{task.task_id}-{hashlib.sha256(brief.encode()).hexdigest()[:16]}"
 
     def _stop_for_owner(self, db, store, engine, run_id, task, reason, message, questions):
         store.add_message(task.project_id, task.task_id, 'lead', dict(
@@ -1030,7 +1138,7 @@ class Runtime:
                 pull = self._repos.find_pull_request(repo['repository'], branch['branch'])
                 if pull is None or pull.state != 'OPEN':
                     pull = self._repos.open_pull_request(repo['repository'], branch['branch'], base=repo['default_branch'],
-                                                         title=title, body=_pull_request_body(task, patch, loop))
+                                                         title=title, body=_pull_request_body(task, patch, loop, recover.debt_of(row['report'])))
             except RepoError as exc:
                 with db.transaction():
                     store.update_branch(task_id, publication='failed', error=exc.code)

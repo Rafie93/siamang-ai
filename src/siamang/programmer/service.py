@@ -76,6 +76,7 @@ from siamang.programmer.result import NOTE_MAX, ProgrammingResult, ProgrammingSt
 from siamang.programmer.safety import find_secret
 from siamang.programmer.snapshot import ProjectSnapshot
 from siamang.programmer.strategy import KNOWN_STRATEGIES, ModelStrategy, ProgrammingDraft, ProgrammingStrategy
+from siamang.programmer.tools import ToolRunner
 from siamang.projects import Project, ProjectNotFoundError
 from siamang.tasks.definition import Task
 from siamang.tasks.engine import TaskEngine
@@ -117,6 +118,7 @@ class Programmer:
         models: ModelRouter | None = None,
         policy: ProgrammingPolicy = DEFAULT_POLICY,
         strategy: str = ModelStrategy.strategy_id,
+        tools: ToolRunner | None = None,
     ):
         if not isinstance(tasks, TaskEngine):
             raise TypeError("tasks must be the TaskEngine")
@@ -130,7 +132,7 @@ class Programmer:
         self._tasks = tasks
         self._projects = tasks.projects  # the registry the engine validates against
         self._router = models
-        self._strategy: ProgrammingStrategy = cls()
+        self._strategy: ProgrammingStrategy = cls(tools) if cls.uses_tools else cls()
         self.policy = policy
 
     @property
@@ -247,20 +249,20 @@ class Programmer:
         if self._router is None:  # 11
             return self._failed(request, ProgrammerModelUnavailableError("no model router is configured",
                                                                          cause="no_router"), notes, metadata)
-        access = ProgrammerModelAccess(self._router)  # fresh, single use: at most one generation
+        access = ProgrammerModelAccess(self._router, self._strategy.generations)  # fresh; a fixed number of calls
         failure: ProgrammingError | None = None
         try:
             draft = self._strategy.propose(context, access)  # 12-13
             if type(draft) is not ProgrammingDraft:
                 raise ProgrammingInternalError("strategy must return a ProgrammingDraft")
             metadata.update(draft.metadata)
-            metadata["model_calls"] = int(access.used)
+            metadata["model_calls"] = access.calls
             return self._result(context, snapshot, draft, notes, metadata)  # 14-16
         except ProgrammingError as exc:
             failure = exc
         except Exception as exc:  # never leak a traceback, path, or model text from a strategy
             failure = ProgrammingInternalError("programming strategy failed", cause=type(exc).__name__)
-        metadata["model_calls"] = int(access.used)
+        metadata["model_calls"] = access.calls
         return self._failed(request, failure, notes, metadata)
 
     def _result(self, context: ProgrammingContext, snapshot: ProjectSnapshot, draft: ProgrammingDraft,

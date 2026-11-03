@@ -82,6 +82,20 @@ class SandboxConfig:
     memory_mb: int = 1024
     cpus: int = 1
     verify_attempts: int = 2  # times a failed verification returns to the Programmer (0-3)
+    tools: bool = False  # Phase 27: the Programmer reads, edits, and runs commands in the sandbox before proposing
+    tool_turns: int = 12  # tool calls per Programmer attempt (1-40)
+    tool_runs: int = 6  # commands per Programmer attempt (1-20)
+
+
+@dataclass(frozen=True)
+class RecoveryConfig:
+    """Phase 28: what a run does when delivery fails. Off keeps the plain verify-and-retry loop."""
+
+    enabled: bool = False
+    retries: int = 1  # tier 1: the Programmer again with the failure as feedback (0-3)
+    advisor_rounds: int = 1  # tier 2: advice on a different approach or a split (0-2); needs the lead model
+    replans: int = 1  # tier 3: plan the remaining work again (0-2)
+    max_attempts: int = 8  # all delivery attempts in one run (1-40)
 
 
 @dataclass(frozen=True)
@@ -121,6 +135,7 @@ class Config:
     contract: ContractConfig = field(default_factory=ContractConfig)
     router: RouterConfig = field(default_factory=RouterConfig)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
+    recovery: RecoveryConfig = field(default_factory=RecoveryConfig)
     providers: Mapping[str, ProviderConfig] = field(default_factory=lambda: MappingProxyType({}))
     models: Mapping[str, ModelConfig] = field(default_factory=lambda: MappingProxyType({}))
     agents: Mapping[str, AgentConfig] = field(default_factory=lambda: MappingProxyType({}))
@@ -134,6 +149,7 @@ _SECTIONS: dict[str, type] = {
     "contract": ContractConfig,
     "router": RouterConfig,
     "sandbox": SandboxConfig,
+    "recovery": RecoveryConfig,
 }
 
 # Keyed-table sections: [<section>.<id>] -> entry dataclass.
@@ -340,6 +356,14 @@ def validate_config(config: Config) -> None:
     for key in ("timeout_secs", "memory_mb", "cpus"):
         if getattr(box, key) < 1:
             raise ConfigError(f"sandbox.{key} must be at least 1")
+    if not 1 <= box.tool_turns <= 40 or not 1 <= box.tool_runs <= 20:
+        raise ConfigError("sandbox.tool_turns must be 1-40 and sandbox.tool_runs 1-20")
+    if box.tools and not box.enabled:
+        raise ConfigError("sandbox.tools needs sandbox.enabled")
+    rec = config.recovery
+    for key, low, high in (("retries", 0, 3), ("advisor_rounds", 0, 2), ("replans", 0, 2), ("max_attempts", 1, 40)):
+        if not low <= getattr(rec, key) <= high:
+            raise ConfigError(f"recovery.{key} must be between {low} and {high}")
     if not config.app.name.strip():
         raise ConfigError("app.name must not be empty")
     if config.app.environment not in ENVIRONMENTS:

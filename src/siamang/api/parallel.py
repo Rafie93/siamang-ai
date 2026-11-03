@@ -210,7 +210,8 @@ class PackageRun:
                 step('reviewing', programmer.iteration)
                 return super().review(request)
 
-        programmer = Coding(engine, models=self.runtime.models('programmer'), policy=PACKAGE_POLICY)
+        programmer = Coding(engine, models=self.runtime.models('programmer'), policy=PACKAGE_POLICY,
+                            **self.runtime.programmer_options())
         work = dict(title=row['title'], specialty=row['specialty'], instructions=row['instructions'], owned_paths=list(owns))
         loop = LoopService(engine, programmer, Checking(engine, policy=QA_POLICY),
                            Reviewing(engine, policy=FOUNDATION_REVIEW if row['kind'] == FOUNDATION else REVIEW_POLICY)).run(

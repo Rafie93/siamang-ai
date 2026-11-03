@@ -28,7 +28,7 @@ def test_text(capsys):
 def test_json(capsys):
     code, out, _ = run(capsys, "programmer", "--json")
     d = json.loads(out)
-    assert code == 0 and d["strategies"] == {"programming.model": "1"}
+    assert code == 0 and d["strategies"] == {"programming.model": "1", "programming.tools": "1"}
     assert d["model_capabilities"] == {"required": ["text_generation"], "preferred": ["structured_output"]}
     assert d["policy"]["writes"] is False and d["policy"]["applies_patches"] is False
     assert d["persistence"] is False and d["events"] is False

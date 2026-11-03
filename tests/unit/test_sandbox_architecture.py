@@ -29,6 +29,7 @@ def test_verification_only_reaches_the_sandbox():
 def test_only_the_api_runtime_uses_them():
     users = {p.relative_to(SRC).as_posix() for p in SRC.rglob("*.py")
              if not p.is_relative_to(SRC / "sandbox") and not p.is_relative_to(SRC / "verification")
+             and not p.is_relative_to(SRC / "executor")
              and any(m.startswith(("siamang.sandbox", "siamang.verification")) for m in _imports(p))}
     assert users == {"api/runtime.py"}  # lazily, inside the method that builds the verifier
 
@@ -36,3 +37,12 @@ def test_only_the_api_runtime_uses_them():
 def test_only_the_runtime_spawns_containers():
     spawners = {p.relative_to(SRC).as_posix() for p in (SRC / "sandbox").glob("*.py") if "subprocess" in p.read_text()}
     assert spawners == {"sandbox/runtime.py"}
+
+
+def test_executor_and_recovery_reach_only_what_they_need():
+    for path in (SRC / "executor").glob("*.py"):
+        assert all(m.startswith(("siamang.executor", "siamang.sandbox", "siamang.log", "siamang.programmer.safety"))
+                   for m in _imports(path)), path.name
+    for path in (SRC / "recovery").glob("*.py"):
+        assert all(m.startswith(("siamang.recovery", "siamang.log")) for m in _imports(path)), path.name
+    assert not any("subprocess" in p.read_text() for d in ("executor", "recovery") for p in (SRC / d).glob("*.py"))

@@ -103,7 +103,7 @@ def test_example_config_is_valid():
 
 def test_describe_is_plain_data():
     d = describe(load_config(env={}))
-    assert set(d) == {"app", "storage", "logging", "contract", "router", "sandbox", "providers", "models", "agents"}
+    assert set(d) == {"app", "storage", "logging", "contract", "router", "sandbox", "recovery", "providers", "models", "agents"}
     assert isinstance(d["storage"]["path"], str)
 
 

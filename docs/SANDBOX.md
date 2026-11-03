@@ -20,6 +20,13 @@ gagal tidak pernah lulus. Check yang gagal kembali ke Programmer sebagai `verifi
 `verify_attempts` kali, lalu run berhenti di `quality_gate` dengan alasan yang terlihat. Laporan ada di
 `report.verification` pada run.
 
+## Agen di dalam sandbox (Phase 27)
+
+`[sandbox] tools = true` membuat Programmer membaca file, mengedit, dan menjalankan perintah di sandbox ini dalam batas
+`tool_turns` dan `tool_runs`, lalu mengusulkan hasilnya. Berbeda dari check verifikasi, perintah di sini dipilih agen,
+bukan operator; karena itu setiap perintah memakai sandbox yang sama (tanpa jaringan, tanpa secret, batas sumber daya), dan
+hasil akhirnya tetap harus lolos check operator sebelum bisa menunggu persetujuan. Detail ada di PHASE_ROADMAP.md.
+
 ## Batas yang jujur
 
 - Jaringan mati, jadi dependensi harus sudah ada di image (`podman pull` dulu).

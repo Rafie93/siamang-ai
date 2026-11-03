@@ -316,7 +316,8 @@ def test_qa_reviewer_loop_approval_are_acyclic():
 
 
 def test_no_future_layer_was_added():
-    for name in ("websocket", "executor", "execution", "runtime", "events", "auth", "applier",
+    for name in ("websocket", "execution",  # "executor" is Phase 27
+                  "runtime", "events", "auth", "applier",
                  "deploy", "shell", "writer", "generator"):
         assert not (SRC / name).exists() and not (SRC / f"{name}.py").exists(), name
 

@@ -27,8 +27,8 @@ Tujuan akhir, prinsip, dan status komponen ada di [VISION.md](VISION.md).
 | 24 | Virtual Office | Berjalan, repo terpisah `siamang-virtual-office` |
 | **25** | **Execution Sandbox** | Selesai di kode; belum diuji dengan container nyata |
 | **26** | **Verification Engine** | Sebagian: test/build di sandbox sudah menentukan lulus; pencocokan acceptance criteria belum |
-| **27** | **Tool Executor** | Belum |
-| **28** | **Recovery Engine dan loop bertingkat** | Belum |
+| **27** | **Tool Executor** | Selesai di kode dan tersambung ke Programmer (`sandbox.tools`); belum diuji dengan container nyata |
+| **28** | **Recovery Engine dan loop bertingkat** | Selesai di kode dan tersambung ke runtime (`[recovery]`); berlaku untuk run satu Programmer |
 | **29** | **Kebijakan otonomi berbasis risiko** | Belum |
 | **30** | **Lead otonom** | Belum |
 | **31** | **Context dan Artifact Manager** | Belum |
@@ -604,3 +604,39 @@ Several Programmers per task, empty repositories, and CI results as `measured` d
 
 Next: feeding model review findings into the revision loop, and tasks of different projects at the same time.
 Today one worker runs one task at a time, however many packages that task has.
+
+## Phase 27 Tool Executor dan Phase 28 Recovery Engine
+
+Keduanya mati secara default dan menyala lewat konfigurasi operator (lihat `siamang.example.toml`). Dengan keduanya mati,
+perilaku run sama seperti sebelumnya.
+
+**Tool Executor** (`siamang.executor`, `[sandbox] tools = true`, perlu `sandbox.enabled`): loop giliran terbatas
+(`tool_turns`, `tool_runs`, dan batas panggilan salah). Agen memanggil satu tool per balasan JSON: `list_files`, `read_file`,
+`write_file`, `delete_file`, `run`, `finish`. Edit hanya ada di overlay memori dan proyek tidak pernah ditulis. Setiap `run`
+berjalan lewat `SandboxService` (tanpa jaringan dan tanpa secret) dan melihat semua edit sejauh ini. File mirip secret,
+symlink, dan isi yang tampak seperti kredensial ditolak di kedua arah. `verified` hanya benar bila perintah terakhir keluar
+dengan kode 0 setelah edit terakhir.
+
+Sambungan ke Programmer: strategi `programming.tools` (daftar putih berdasarkan ID, seperti `programming.model`). Hasil
+agen menjadi draft yang sama dengan balasan satu tembakan, lalu divalidasi ulang oleh Programmer (path, step, ukuran,
+before-state, hash). Agen tidak pernah menetapkan before-state. Akses model dibatasi `tool_turns + 1` generasi per percobaan,
+tidak lagi satu. Tanpa mesin container, strategi jatuh ke satu tembakan dan menulis peringatan. Hasil tanpa lari lulus setelah
+edit terakhir diberi peringatan "not verified" dan menjadi utang teknis. Agen boleh berhenti dengan `questions`, yang menjadi
+hasil `waiting` seperti biasa. Metadata hasil memuat `sandbox_*` tanpa perintah (aturan lama melarang perintah di hasil).
+
+**Recovery Engine** (`siamang.recovery`, `[recovery] enabled = true`): menggantikan loop verifikasi-ulang pada run satu
+Programmer. Satu tahap `deliver` (loop Programmer, QA, Reviewer, lalu verifikasi di sandbox). Tingkat 1 mengulangnya dengan
+alasan gagal sebagai `recovery_feedback` dan keluaran pemeriksaan sebagai `verification_failure`. Tingkat 2 meminta model Lead
+(atau Analyst) memilih `change_approach`, `split`, atau `give_up`; jawaban tak terpakai berarti `give_up`. Tingkat 3 menyusun
+ulang rencana dari instruksi ditambah alasan gagal, lalu mengulang delivery. Semua dibatasi (`retries`, `advisor_rounds`,
+`replans`, `max_attempts`). Bila semua gagal, run berhenti di `quality_gate` dengan `report.recovery` yang memuat tahap dan alasannya.
+
+Checkpoint: hasil delivery yang selesai disimpan di `data/checkpoints/` dengan kunci task + sidik jari brief, jawaban pemilik,
+dan desain, lalu dihapus setelah laporan tersimpan. Bila run mati di antaranya, percobaan berikutnya dengan masukan sama tidak
+mengulang Programmer, QA, Reviewer, dan pemeriksaan. Checkpoint lebih tua dari 6 jam diabaikan. Kompromi (saran penasihat,
+rencana yang disusun ulang, tes yang tak dijalankan Programmer) masuk `report.recovery.debt` dan bagian "Technical debt" di
+deskripsi PR.
+
+Batas yang jujur: belum diuji dengan container nyata (hanya mesin tiruan); run paket paralel memakai jalur lama untuk
+recovery tetapi Programmer-nya sudah bisa memakai tool; replan memakai Planner berbasis templat, jadi langkahnya bisa sama
+dan hanya instruksinya yang berubah; checkpoint hanya untuk tahap delivery.

@@ -70,7 +70,7 @@ def test_nothing_upstream_imports_approval():
 
 def test_no_future_layers_exist():
     for name in FUTURE:
-        if name in ("api", "sandbox"):  # Phase 20 transport, Phase 25 sandbox; upstream imports remain forbidden
+        if name in ("api", "sandbox", "executor"):  # Phase 20 transport, 25 sandbox, 27 executor; upstream imports remain forbidden
             continue
         assert not (SRC / name).exists(), name
         assert not (SRC / f"{name}.py").exists(), name

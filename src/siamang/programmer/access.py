@@ -12,10 +12,11 @@ this equivalent narrow facade instead:
   provider, adapter, SDK, or network client is reachable from here;
 * only ``text_generation`` and ``structured_output`` may be required
   (no tool calling, vision, or streaming);
-* **one generation per instance**. The service builds a fresh access for
-  every programming attempt, so one ``program()`` call makes at most one
-  model generation: no retry, fallback, repair, or reflection call can hide
-  behind it;
+* **a fixed number of generations per instance** (one unless the strategy
+  declares more, as the tool strategy does for its bounded turns). The service
+  builds a fresh access for every programming attempt, so one ``program()``
+  call makes at most that many model generations: no retry, fallback, repair,
+  or reflection call can hide behind it;
 * every :class:`~siamang.models.ModelError` becomes a programmer error with
   the model error code as ``cause`` (no vendor detail, message, or
   credential).
@@ -51,17 +52,24 @@ def model_failure(exc: ModelError) -> ProgrammingError:
 
 
 class ProgrammerModelAccess:
-    __slots__ = ("_router", "_used")
+    __slots__ = ("_router", "_limit", "_calls")
 
-    def __init__(self, router: ModelRouter):
+    def __init__(self, router: ModelRouter, limit: int = 1):
         if not isinstance(router, ModelRouter):
             raise TypeError("model access needs a ModelRouter")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 40:
+            raise ValueError("limit must be an integer in [1, 40]")
         self._router = router
-        self._used = False
+        self._limit = limit
+        self._calls = 0
 
     @property
     def used(self) -> bool:
-        return self._used
+        return self._calls > 0
+
+    @property
+    def calls(self) -> int:
+        return self._calls
 
     def structured_output_available(self) -> bool:
         """Does an enabled model offer structured output? Reads the registry; generates nothing."""
@@ -71,15 +79,17 @@ class ProgrammerModelAccess:
     def generate(self, request: ModelRequest) -> ModelResponse:
         if not isinstance(request, ModelRequest):
             raise ProgrammingInternalError("model request must be a ModelRequest")
-        if self._used:
-            raise ProgrammingInternalError("one model generation per programming attempt")
+        if self._calls >= self._limit:
+            raise ProgrammingInternalError(
+                "one model generation per programming attempt" if self._limit == 1
+                else f"at most {self._limit} model generations per programming attempt")
         if request.model_id is not None:
             raise ProgrammerModelRejectedError("the Programmer may not pin a model; the ModelRouter selects")
         extra = request.effective_capabilities - ALLOWED_CAPABILITIES
         if extra:
             raise ProgrammerModelRejectedError("model request needs capabilities the Programmer may not use",
                                                details=tuple(sorted(map(str, extra))))
-        self._used = True  # spent before the call: a failure is not a licence to call again
+        self._calls += 1  # spent before the call: a failure is not a licence to call again
         failure: ProgrammingError | None = None
         try:
             return self._router.select(request).generate(request)

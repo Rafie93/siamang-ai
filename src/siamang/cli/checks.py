@@ -182,7 +182,7 @@ def check_programmer() -> Check:
     try:
         from siamang.programmer import DEFAULT_POLICY, KNOWN_STRATEGIES, Patch, ProgrammingResult, ProposedChange
 
-        if set(KNOWN_STRATEGIES) != {"programming.model"}:
+        if set(KNOWN_STRATEGIES) != {"programming.model", "programming.tools"}:
             return Check("Programmer", FAIL, "unexpected programming strategies")
         policy = DEFAULT_POLICY.to_dict()
         if policy["writes"] or policy["applies_patches"] or policy["executes"] or policy["retries"]:

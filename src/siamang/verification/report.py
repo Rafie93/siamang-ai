@@ -61,6 +61,14 @@ class VerificationReport:
                   for c in self.checks if c.status not in ("passed", "skipped")]
         return {"failed_checks": failed}
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> VerificationReport:
+        """Rebuild a stored report (a checkpoint). Anything malformed raises: a run never resumes on a guess."""
+        checks = tuple(CheckOutcome(str(c["name"]), str(c["status"]), c["exit_code"], str(c["output"]),
+                                    float(c["seconds"])) for c in data["checks"])
+        return cls(VerificationStatus(data["status"]), checks, tuple(dict(c) for c in data["criteria"]),
+                   str(data.get("note", "")))
+
     def to_dict(self) -> dict[str, Any]:
         verified = sum(1 for c in self.criteria if c["status"] == "verified")
         return {"status": str(self.status), "passed": self.passed, "note": self.note,

@@ -98,13 +98,13 @@ Status per 3 November 2026, berdasarkan pembacaan kode dan dokumentasi.
 | Programmer | Sudah | Patch, paralel per paket | Bekerja dengan tool, bukan satu panggilan model | 27 |
 | QA | Sebagian | Pemeriksaan statis, rencana test | Menjalankan test | 26 |
 | Reviewer | Sudah | Pemeriksaan deterministik dan independen; ulasan model bersifat saran | Temuan model masuk loop revisi | 26 |
-| Tool Executor | Fondasi | Registry dan izin, tool read-only | Tool filesystem, Python, dan CLI untuk agen | 27 |
+| Tool Executor | Sebagian | Registry dan izin, tool read-only; Programmer membaca, mengedit, dan menjalankan perintah di sandbox dalam batas giliran (`sandbox.tools`, [SANDBOX.md](SANDBOX.md)) | Diuji dengan container nyata; belum dipakai agen selain Programmer | 27 |
 | Repository Manager | Sudah | Clone, branch, commit, PR ke `siamang/*`, baca CI | Akun per instalasi | 33 |
 | Context Manager | Sebagian | Pemilihan file dan anggaran konteks | Indeks kode dan memori antar-run | 31 |
 | Artifact Manager | Sebagian | Dokumen dan patch tersimpan dengan hash | Penyimpanan hasil build | 31 |
-| Execution Sandbox | Sebagian | Container podman/docker per perintah: tanpa jaringan, tanpa secret, batas waktu dan sumber daya ([SANDBOX.md](SANDBOX.md)) | Diuji dengan container nyata; belum dipakai agen (Phase 27) | 25 |
+| Execution Sandbox | Sebagian | Container podman/docker per perintah: tanpa jaringan, tanpa secret, batas waktu dan sumber daya ([SANDBOX.md](SANDBOX.md)) | Diuji dengan container nyata | 25 |
 | Verification Engine | Sebagian | QA statis, Reviewer, loop, bukti persetujuan, hasil CI GitHub, test/build di sandbox yang menentukan lulus | Pencocokan tiap acceptance criteria dengan sebuah check | 26 |
-| Recovery Engine | Sebagian | Deteksi run terputus, retry manual, paket perbaikan, CI gagal kembali ke Programmer dengan batas | Eskalasi, rollback, checkpoint | 28 |
+| Recovery Engine | Sebagian | Tiga tingkat (ulang dengan umpan balik, penasihat, susun ulang rencana), checkpoint penyelesaian delivery, kompromi masuk utang teknis di PR (`[recovery]`); run terputus, paket perbaikan, CI gagal kembali ke Programmer | Rollback; tahap selain delivery belum punya checkpoint sendiri; tidak berlaku untuk run paket paralel | 28 |
 | Permission Manager | Sudah | Deny by default, izin per identitas, persetujuan dengan bukti asal-usul | Kebijakan berbasis risiko, login multi-user | 29, 33 |
 
 ## Aturan lama yang akan berubah

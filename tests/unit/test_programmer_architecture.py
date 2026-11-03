@@ -97,7 +97,7 @@ def test_nothing_else_imports_the_programmer():
     # Phase 16: QA re-validates the Phase 15 domain (change, patch, safety, snapshot) as data and reads the
     # project only through ProjectSnapshot. It never imports or calls the Programmer service.
     # repos/workspace.py applies an approved patch and reads the Phase 15 domain as data.
-    assert users == {'api/codec.py','api/runtime.py','api/parallel.py', 'documents/packages.py', "repos/workspace.py", "sandbox/workspace.py", "cli/main.py", "cli/checks.py", "qa/checks.py", "qa/finding.py", "qa/policy.py",
+    assert users == {'api/codec.py','api/runtime.py','api/parallel.py', 'documents/packages.py', "repos/workspace.py", "sandbox/workspace.py", "executor/workspace.py", "api/tooling.py", "cli/main.py", "cli/checks.py", "qa/checks.py", "qa/finding.py", "qa/policy.py",
                      "qa/request.py", "qa/result.py", "qa/service.py",
                      # Phase 17: the Reviewer re-validates the same domain as data and never reads the project.
                      "reviewer/checks.py", "reviewer/finding.py", "reviewer/policy.py", "reviewer/request.py",
@@ -125,7 +125,7 @@ def test_no_future_layers_exist():
         assert not (SRC / f"{name}.py").exists(), name
     assert {p.stem for p in PROGRAMMER.glob("*.py")} == {"__init__", "errors", "safety", "request", "change",
                                                          "patch", "result", "policy", "access", "snapshot",
-                                                         "context", "strategy", "service"}
+                                                         "context", "strategy", "service", "tools"}
 
 
 def test_programmer_is_not_an_agent_and_not_orchestrated():
@@ -159,13 +159,13 @@ def test_public_api_is_program_only():
 
     assert {n for n in dir(Programmer) if not n.startswith("_")} == {"program", "strategy_id"}
     assert {n for n in dir(ProgrammerModelAccess) if not n.startswith("_")} == {
-        "generate", "structured_output_available", "used"}
+        "calls", "generate", "structured_output_available", "used"}
 
 
 def test_strategies_are_allowlisted_by_id():
     from siamang.programmer import KNOWN_STRATEGIES
 
-    assert dict(KNOWN_STRATEGIES).keys() == {"programming.model"}
+    assert dict(KNOWN_STRATEGIES).keys() == {"programming.model", "programming.tools"}
     try:
         KNOWN_STRATEGIES["x"] = object  # type: ignore[index]
     except TypeError:
