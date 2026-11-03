@@ -35,7 +35,7 @@ materi publik wajib menyebut batas hari ini, sampai phase terkait selesai:
 * Jangan menyebut kode sudah dijalankan atau diuji oleh Siamang sebelum Phase 26.
   Hari ini, bukti eksekusi hanya berasal dari CI GitHub.
 * Jangan menyebut Siamang otonom penuh sebelum Phase 29. Hari ini, dua gerbang masih
-  wajib disetujui manusia.
+  wajib disetujui manusia. Otomatis hanya perbaikan CI pada PR yang sudah disetujui.
 
 ## Dari pipeline ke runtime
 
@@ -103,8 +103,8 @@ Status per 3 November 2026, berdasarkan pembacaan kode dan dokumentasi.
 | Context Manager | Sebagian | Pemilihan file dan anggaran konteks | Indeks kode dan memori antar-run | 31 |
 | Artifact Manager | Sebagian | Dokumen dan patch tersimpan dengan hash | Penyimpanan hasil build | 31 |
 | Execution Sandbox | Belum | Tidak ada isolasi eksekusi | Seluruhnya | 25 |
-| Verification Engine | Sebagian | QA statis, Reviewer, loop, bukti persetujuan | Bukti dari eksekusi nyata | 26 |
-| Recovery Engine | Sebagian | Deteksi run terputus, retry manual, paket perbaikan | Retry otomatis, eskalasi, rollback, checkpoint | 28 |
+| Verification Engine | Sebagian | QA statis, Reviewer, loop, bukti persetujuan, hasil CI GitHub | Eksekusi nyata milik Siamang, terutama untuk repo tanpa CI | 26 |
+| Recovery Engine | Sebagian | Deteksi run terputus, retry manual, paket perbaikan, CI gagal kembali ke Programmer dengan batas | Eskalasi, rollback, checkpoint | 28 |
 | Permission Manager | Sudah | Deny by default, izin per identitas, persetujuan dengan bukti asal-usul | Kebijakan berbasis risiko, login multi-user | 29, 33 |
 
 ## Aturan lama yang akan berubah

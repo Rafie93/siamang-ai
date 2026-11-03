@@ -164,7 +164,7 @@ ID mengikuti penomoran asli per phase.
 | RV7 | Hasil QA menjadi bukti: QA gagal berarti review gagal | Review tidak bisa lebih baik dari buktinya |
 | LP5 | Status Loop mengikuti bukti terakhir, tidak pernah lebih baik | Mencegah kelulusan semu |
 | LP10 | Bawaan 3 putaran, batas keras 5 | Loop selalu berhenti |
-| AP2 | Tidak ada approval otomatis atau implisit | Lihat [VISION.md](VISION.md) untuk rencana kebijakan |
+| AP2 | Tidak ada approval implisit; perbaikan CI memakai aktor kebijakan yang tercatat | Lihat [HTTP_API.md](HTTP_API.md) |
 | AP6 | Provenance berupa ID dan content hash yang dihitung ulang | Rantai bukti palsu tertolak |
 | AP11 | Hasil approval disegel dengan HMAC | Hasil yang dipalsukan atau dipindah tertolak |
 | H2 | Heartbeat berarti hidup, bukan kemajuan | Status tetap jujur |

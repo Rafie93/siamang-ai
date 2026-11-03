@@ -44,6 +44,7 @@ name = "Local echo (wiring test)"
 # [agents.programmer]
 # model = "claude-sonnet"
 # parallel = 3            # work packages at the same time (1-6); more uses subscription limits faster
+# ci_repair = 2           # times a failed build returns to the Programmer (0-3); 0 turns it off
 
 # Models: one table per model; the table key is SIAMANG's model_id.
 # priority: lower = preferred. Capabilities: text_generation,

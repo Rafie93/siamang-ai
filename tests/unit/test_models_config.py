@@ -171,7 +171,7 @@ def _agent_config(tmp_path, extra):
 def test_agent_model_is_loaded_and_described(tmp_path):
     config = load_config(_agent_config(tmp_path, '[agents.programmer]\nmodel = "second"\n'), env={})
     assert config.agents["programmer"].model == "second"
-    assert describe(config)["agents"] == {"programmer": {"model": "second", "parallel": 3}}
+    assert describe(config)["agents"] == {"programmer": {"model": "second", "parallel": 3, "ci_repair": 2}}
 
 
 @pytest.mark.parametrize("extra, message", [

@@ -20,6 +20,8 @@ These limits shape every answer, so check them before promising anything:
 - One task runs at a time. A second run returns 409 `worker_busy`. Parallelism exists
   only between work packages inside one task (`parallel` in `[agents.programmer]`).
 - Pushes reach only `siamang/*` branches, without force or merge. Merging is the owner's.
+- A failed build returns to the Programmer up to `ci_repair` times, as new `source=system` tasks on the same pull
+  request. Those tasks are expected, so do not cancel or re-run them unless the owner asks.
 - Static `pass` does not mean the code works. Report it as "passed static checks".
 
 ## Running a task

@@ -95,6 +95,7 @@ class ModelConfig:
 class AgentConfig:
     model: str
     parallel: int = 3  # the Programmer only: how many work packages run at the same time
+    ci_repair: int = 2  # the Programmer only: how many times a failed build returns to it (0 = never)
 
 
 @dataclass(frozen=True)
@@ -148,6 +149,7 @@ _ENTRY_KEYS: dict[str, dict[str, tuple[str, bool]]] = {
     "agents": {
         "model": ("str", True),
         "parallel": ("int", False),
+        "ci_repair": ("int", False),
     },
 }
 
@@ -363,6 +365,8 @@ def _validate_models(config: Config) -> None:
             raise ConfigError(f"{where}.model {a.model!r} is not a configured model")
         if not 1 <= a.parallel <= 6:
             raise ConfigError(f"{where}.parallel must be between 1 and 6")
+        if not 0 <= a.ci_repair <= 3:
+            raise ConfigError(f"{where}.ci_repair must be between 0 and 3")
 
 
 def describe(config: Config) -> dict[str, dict[str, Any]]:

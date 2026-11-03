@@ -23,7 +23,8 @@ agen, karena setiap hasil menunjukkan dari mana asalnya.
 | **Asal setiap hasil terlihat** | Dokumen berlabel `authored` (tulisan model), `derived` (dihitung sistem), atau `measured` (hasil ukur) | Berlaku juga untuk tiap aksi agen |
 | **Model tidak bisa mengaku lulus** | Status lulus berasal dari pemeriksaan deterministik, dan hasil test hanya dari CI | Test dan build dijalankan di sandbox |
 | **Keputusan terikat pada bukti** | Persetujuan menghitung ulang rantai bukti dan menolak yang berubah | Keputusan otomatis dicatat dengan cara yang sama |
-| **Otonomi bisa diaudit** | Dua gerbang wajib disetujui manusia | Gerbang mengikuti kebijakan risiko |
+| **Gagal berarti diperbaiki, dengan batas** | CI yang gagal kembali ke Programmer sampai lulus atau batasnya tercapai; agen dilarang melemahkan test | Test dan build di sandbox masuk loop yang sama |
+| **Otonomi bisa diaudit** | Dua gerbang wajib disetujui manusia; perbaikan CI dicatat atas nama kebijakannya | Gerbang mengikuti kebijakan risiko |
 
 ## Cara kerja
 
@@ -37,7 +38,8 @@ flowchart LR
   R -->|ditahan| C
   R -->|lulus| G2{Persetujuan akhir}
   G2 --> PR[Branch siamang/* dan PR]
-  PR --> CI[Hasil CI GitHub]
+  PR --> CI{CI GitHub}
+  CI -->|gagal, terbatas| C
 ```
 
 | Agen | Tugas | Memakai model |
@@ -52,7 +54,7 @@ flowchart LR
 Batasan yang sengaja dijaga:
 
 * Push hanya ke branch `siamang/*`, tanpa force dan tanpa merge.
-* Tidak ada perubahan yang dipublikasikan tanpa persetujuan Anda.
+* Perubahan pertama selalu menunggu persetujuan Anda. Perbaikan CI otomatis hanya masuk ke PR yang sudah Anda setujui dan masih terbuka, dan merge tetap di tangan Anda.
 * Dokumen tulisan model diberi label draf, dan hasil test tidak pernah ditulis model.
 * Satu task berjalan pada satu waktu. Paralel hanya terjadi antar-paket dalam satu task.
 
@@ -109,6 +111,7 @@ priority = 10
 [agents.programmer]
 model = "claude-sonnet"
 parallel = 3                  # paket kerja bersamaan (1-6)
+ci_repair = 2                 # berapa kali CI gagal kembali ke Programmer (0-3, 0 = mati)
 ```
 
 Provider yang tersedia: `claude_cli`, `ollama`, dan `echo`. `echo` hanya untuk

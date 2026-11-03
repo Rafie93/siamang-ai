@@ -168,6 +168,23 @@ After a push, `task.ci` follows the commit's GitHub Actions runs: `watching`, `s
 workflow ran within two minutes, or `timeout`. Jobs and artifact names and sizes come only from GitHub's report, and fill the
 `measured` documents `ci_results` and `build_artifacts`. Artifacts stay on GitHub, reachable from the run page.
 
+### When CI fails
+
+A failed build returns to the Programmer. `[agents.programmer] ci_repair` (default 2, at most 3, 0 turns it off) bounds how many times.
+Each attempt is a new task with `source=system`, the same branch and pull request, and `metadata.ci_repair` naming the attempt, the failed
+task, and the root task. It skips the Lead's questions and the design gate, and runs the normal Programmer, QA, and Reviewer loop with the
+failed jobs and the end of the redacted log as data under `ci_failure`.
+
+A repair that passes is approved through the unchanged ApprovalService by the policy actor `policy.ci-repair`, which only this path uses, so
+the evidence is re-derived and the record names who decided. It is committed to the open pull request's branch. Nothing merges.
+
+A repair is held at `quality_gate` and not pushed when QA or the Reviewer holds it, or when it looks like it hides the failure: changing CI
+configuration, deleting a test, adding a skip, or removing more assertions than it adds. This check is a heuristic, not proof of an honest fix.
+
+No repair starts, and the task receives a message saying why, when the attempts are used up, the same failure returns (timestamps, hashes, and
+durations do not count), the log cannot be read, or the branch moved since that build. A merged or closed pull request ends it silently. A
+repair that finds the worker busy waits up to an hour; after a restart it stays queued and `POST /v0/tasks/{id}/run` starts it.
+
 ### When a run stops
 
 Each task gets a `siamang/*` branch. A run that stops short of an approval says why, and

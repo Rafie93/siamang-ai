@@ -41,8 +41,10 @@ from siamang.qa import QAService
 from siamang.reviewer import ReviewerService
 from siamang.storage import Database
 from siamang.tasks import TaskEngine, TaskFailure, TaskResult
+from siamang.tasks.definition import TaskRequest
 
 from .codec import decode, encode
+from . import ci_repair
 from .parallel import ONE_ROUND, QA_POLICY, INTEGRATION_REVIEW, INPUT_DESIGN_BYTES, SPEC_BYTES, Merged, PackageRun, PackageStopped, commit_groups, merge_patches
 from .store import RunStore, now
 
@@ -147,6 +149,15 @@ class Runtime:
         from siamang.config import load_config
         pin = load_config(self.settings.config).agents.get('programmer')
         return pin.parallel if pin else 3
+
+    def ci_repair_limit(self):
+        if self._models is not None:
+            return self.ci_repair_attempts
+        from siamang.config import load_config
+        pin = load_config(self.settings.config).agents.get('programmer')
+        return pin.ci_repair if pin else ci_repair.DEFAULT_ATTEMPTS
+
+    ci_repair_attempts = ci_repair.DEFAULT_ATTEMPTS
 
     def open(self):
         self.settings.database.parent.mkdir(parents=True, exist_ok=True)
@@ -295,7 +306,8 @@ class Runtime:
                         raise Stopped()
                     task = engine.start(task_id)
                     # With a design gate the first visible work is the Lead's brief; the template plan is only input.
-                    gated = mode == 'start' and bool(self.author('planner') or self.author('analyst'))
+                    repair = ci_repair.info(task)  # a failed build is the brief: the approved design still stands
+                    gated = mode == 'start' and not repair and bool(self.author('planner') or self.author('analyst'))
                     store.update(run_id, state='running',
                                  phase='programming' if mode == 'code' else 'briefing' if gated else 'planning')
                 pulse.start()
@@ -309,7 +321,9 @@ class Runtime:
                 # Only the design: a report from an earlier attempt must not read as an instruction to the Programmer.
                 stored = tuple(_stored(row) for row in store.documents(task_id, run_id)
                                if row['stage'] in DESIGN_STAGES)
-                focus = self._focus(ProjectRegistry(db).get(task.project_id), stored, task) if repo and not gated else ()
+                failed_ci = store.ci(repair['failed_task_id']) if repair else None
+                failed_log = (failed_ci or {}).get('log') or ''
+                focus = self._focus(ProjectRegistry(db).get(task.project_id), stored, task, failed_log) if repo and not gated else ()
                 analysis = SystemAnalyst(engine).analyze(AnalysisRequest(**ids, plan=plan, focus=focus))
                 project = ProjectRegistry(db).get(task.project_id)
                 brief = dict(project=dict(name=project.name, description=project.description),
@@ -402,7 +416,8 @@ class Runtime:
                     loop = LoopService(engine, programmer, TrackedQA(engine), TrackedReviewer(engine)).run(
                         LoopRequest(**ids, plan=plan, analysis=analysis,
                                     input=design_input(design) | ({'project_spec': clip_bytes(spec)} if spec else {})
-                                    | ({'owner_conversation': conversation_tail(conversation)} if conversation else {})))
+                                    | ({'owner_conversation': conversation_tail(conversation)} if conversation else {})
+                                    | (ci_repair.failure_input(ci_repair.failed_jobs(failed_ci['runs']), failed_log) if failed_ci else {})))
                 if str(loop.stop_reason) == 'programmer_waiting':
                     # The Programmer needs a decision: it reaches the owner, and the answer returns to it.
                     asked = programmer.last
@@ -424,7 +439,7 @@ class Runtime:
                             loop=dict(iterations=len(loop.iterations), stop_reason=str(loop.stop_reason)),
                             design=[dict(document=d.spec.kind, text=clip(d.content)) for d in design
                                     if d.status is DocumentStatus.GENERATED])
-                if patch:  # no code means nothing for these agents to write about
+                if patch and not repair:  # no code means nothing to write about, and a repair is judged by its build
                     for stage in ('programming', 'qa', 'reviewing', 'reporting'):
                         documents(stage, work)
                 bundle = json.dumps({'version': 1, 'plan': encode(plan), 'analysis': encode(analysis),
@@ -442,15 +457,23 @@ class Runtime:
                                                          retryable=True, details={'cause': cause}))
                         store.update(run_id, state='failed', phase='failed')
                         return
-                    reason = 'approval_required' if loop.passed else 'quality_gate'
-                    if not loop.passed:
+                    silenced = ci_repair.silencing_reason(patch, project.root_path) if repair and loop.passed else None
+                    passed = loop.passed and not silenced
+                    reason = 'approval_required' if passed else 'quality_gate'
+                    if silenced:
+                        store.add_message(task.project_id, task_id, 'lead', dict(
+                            message='Perbaikan CI ini ditahan dan tidak dikirim, karena tampak menyembunyikan kegagalan.',
+                            questions=[dict(question=silenced, options=[])]))
+                    elif not loop.passed:
                         store.add_message(task.project_id, task_id, 'lead', dict(
                             message=f'QA dan Reviewer masih menahan hasil ini setelah {len(loop.iterations)} putaran. '
                                     'Beri arahan dan Programmer mengerjakannya lagi, atau batalkan task ini.',
                             questions=[dict(question=b, options=[]) for b in _blockers(loop)]))
                     engine.wait(task_id, reason=reason)
-                    store.update(run_id, state='waiting', phase='awaiting_approval' if loop.passed else 'blocked',
+                    store.update(run_id, state='waiting', phase='awaiting_approval' if passed else 'blocked',
                                  wait_reason=reason)
+                if repair and passed:
+                    self._approve_repair(db, store, engine, run_id)
         except BaseException as exc:
             with Database(self.settings.database) as db:
                 engine, store = TaskEngine(db, ProjectRegistry(db)), RunStore(db)
@@ -578,6 +601,15 @@ class Runtime:
                                 log = None
                         store.set_ci(task_id, sha, 'failed' if failed else 'success', runs, log)
                         self._record_ci(store, task_id, runs, log)
+                        if failed:
+                            try:
+                                self._repair_ci(db, store, engine, task, sha, runs, log)
+                            except Exception as exc:  # noqa: BLE001 - a background job has no caller: the owner hears of it
+                                store.add_message(task.project_id, task_id, 'lead', dict(
+                                    message=f'Perbaikan otomatis gagal dimulai ({type(exc).__name__}). Pull request tetap terbuka.',
+                                    questions=[]))
+                        else:
+                            self._note_ci_recovered(store, task)
                         return
                     store.set_ci(task_id, sha, 'watching', runs)
                 elif runs == [] and waited > CI_NO_WORKFLOW_SECS:
@@ -591,6 +623,65 @@ class Runtime:
     ci_poll_secs = CI_POLL_SECS
 
     @staticmethod
+    def _note_ci_recovered(store, task):
+        repair = ci_repair.info(task)
+        if repair:
+            message = f"CI lulus setelah {repair['attempt']} perbaikan otomatis. Pull request menunggu keputusan Anda."
+            for task_id in {task.task_id, repair['root_task_id']}:
+                store.add_message(task.project_id, task_id, 'lead', dict(message=message, questions=[]))
+
+    def _repair_ci(self, db, store, engine, task, sha, runs, log):
+        """Send a failed build back to the Programmer, or say why it stops here. The pull request stays open either way."""
+        limit = self.ci_repair_limit()
+        if not limit:
+            return
+        previous = ci_repair.info(task)
+        attempt = (previous['attempt'] if previous else 0) + 1
+
+        def stop(message):
+            store.add_message(task.project_id, task.task_id, 'lead', dict(message=message, questions=[]))
+
+        if not log:
+            return stop('CI gagal, tetapi log-nya tidak bisa dibaca, jadi tidak ada dasar untuk memperbaikinya otomatis.')
+        if attempt > limit:
+            return stop(f'CI masih gagal setelah {limit} perbaikan otomatis. Pull request tetap terbuka untuk Anda periksa.')
+        mark = ci_repair.fingerprint(log)
+        if previous and previous['fingerprint'] == mark:
+            return stop('Perbaikan otomatis dihentikan: CI gagal dengan cara yang sama, jadi mengulang tidak akan membantu.')
+        repo, branch, root = store.repo(task.project_id), store.branch(task.task_id), task_root(store, task)
+        try:
+            pull = self._repos.find_pull_request(repo['repository'], branch['branch'])
+        except RepoError as exc:
+            return stop(f'Perbaikan otomatis tidak dimulai, karena status pull request tidak terbaca ({exc.code}).')
+        if pull is None or pull.state != 'OPEN':
+            return None  # merged or closed: the owner already decided
+        self._repos.refresh(root)
+        if self._repos.revision(root, branch['branch']) != sha:
+            return stop('Perbaikan otomatis tidak dimulai, karena branch ini sudah berubah sejak build tersebut.')
+        jobs = ci_repair.failed_jobs(runs)
+        with db.transaction():
+            created = engine.create(TaskRequest.from_dict(dict(
+                project_id=task.project_id, source='system', request_id=f'req_ci_{sha[:24]}',
+                description=ci_repair.description(task.title or task.description.splitlines()[0], attempt, limit, jobs),
+                metadata={ci_repair.METADATA_KEY: dict(attempt=attempt, fingerprint=mark, failed_task_id=task.task_id,
+                                                       root_task_id=previous['root_task_id'] if previous else task.task_id)}))).task
+            self.assign_branch(store, created, task.task_id)
+        begun = now_seconds()
+        while not self._closing and now_seconds() - begun < CI_TIMEOUT_SECS:
+            try:
+                self.schedule(created.task_id)
+                return None
+            except RuntimeRefusal as exc:
+                if exc.code in ('task_not_queued', 'task_already_has_run'):
+                    return None
+                if exc.code != 'worker_busy':
+                    return stop(f'Perbaikan otomatis tidak bisa dijalankan ({exc.code}).')
+            self._ci_wake.wait(self.ci_poll_secs)
+        if not self._closing:
+            stop('Perbaikan otomatis terlalu lama menunggu giliran. Task perbaikannya masih antre dan bisa dijalankan manual.')
+        return None
+
+    @staticmethod
     def _record_ci(store, task_id, runs, log):
         run_id = (store.latest(task_id) or {}).get('run_id')
         jobs = [f"- {r['name']} / {j['name']}: **{j['conclusion'] or j['status']}**" for r in runs for j in r['jobs']]
@@ -601,16 +692,17 @@ class Runtime:
             Document(SPECS['build_artifacts'], DocumentStatus.GENERATED, '\n'.join(artifacts)) if artifacts else
             Document(SPECS['build_artifacts'], DocumentStatus.NOT_RUN, reason='Workflow tidak mengunggah artefak.'),))
 
-    def _focus(self, project, documents, task):
+    def _focus(self, project, documents, task, log=''):
         """Which files the Programmer reads. Chosen here from the tracked list, never by an API caller."""
         limit = MODEL_POLICY.max_context_files
         names = source_files(self._repos.files(project.root_path))
         if len(names) <= limit:
             return tuple(names)
-        texts = [d.content for d in documents if d.status is DocumentStatus.GENERATED]
+        texts = [d.content for d in documents if d.status is DocumentStatus.GENERATED] + ([log] if log else [])
         chosen = choose_files(self.author('analyst'), dict(
             instruction=task.description, design=[clip(t, 3_000) for t in texts]), names, limit)
-        return tuple((chosen or named_in(names, texts))[:limit])
+        in_log = [n for n in names if n in log]  # a failing build names its own files
+        return tuple(dict.fromkeys(in_log + list(chosen or named_in(names, texts))))[:limit]
 
     def _sign(self, run_id, task_id, bundle):
         return hmac.new(self.settings.seal_key, f'{run_id}\n{task_id}\n{bundle}'.encode(), hashlib.sha256).hexdigest()
@@ -665,28 +757,53 @@ class Runtime:
                     raise RuntimeRefusal('approval_not_pending')
                 policy = ApprovalPolicy(authorized_approvers={p.identity for p in self.settings.principals
                                                               if 'approve' in p.permissions})
-                service = ApprovalService(engine, policy=policy, seal_key=self.settings.seal_key)
-                result = service.decide(request, ApprovalDecision(decision, principal.identity, reason))
-                service.verify(result, request)
-                stored = json.dumps(result.to_dict())
-                signed = json.dumps([stored, decision_input, principal.identity], separators=(',', ':'))
-                db.conn.execute('UPDATE api_runs SET decision=?,decision_input=?,decision_actor=?,decision_seal=? WHERE run_id=?',
-                                (stored, decision_input, principal.identity, self._sign(run_id, row['task_id'], signed), run_id))
-                publish = bool(result.approved and store.branch(task.task_id))
-                if result.approved:
-                    engine.start(task.task_id)
-                    summary = 'Proposal approved; publishing to a branch.' if publish else 'Proposal approved; patch not applied.'
-                    engine.complete(task.task_id, TaskResult(summary, details={'proposal_approved': True, 'patch_applied': False}))
-                    store.update(run_id, state='completed', phase='finished')
-                    if publish:
-                        store.update_branch(task.task_id, publication='publishing', error=None)
-                else:
-                    engine.cancel(task.task_id, reason='Proposal rejected by authorized approver.')
-                    store.update(run_id, state='cancelled', phase='cancelled')
-                decided = result.to_dict()
+                decided, publish = self._record_decision(db, store, engine, run_id, row, task, request, policy,
+                                                         principal.identity, decision, reason, decision_input)
             if publish:
                 self._submit_publish(run_id)
             return decided
+
+    def _record_decision(self, db, store, engine, run_id, row, task, request, policy, actor, decision, reason, decision_input):
+        service = ApprovalService(engine, policy=policy, seal_key=self.settings.seal_key)
+        result = service.decide(request, ApprovalDecision(decision, actor, reason))
+        service.verify(result, request)
+        stored = json.dumps(result.to_dict())
+        signed = json.dumps([stored, decision_input, actor], separators=(',', ':'))
+        db.conn.execute('UPDATE api_runs SET decision=?,decision_input=?,decision_actor=?,decision_seal=? WHERE run_id=?',
+                        (stored, decision_input, actor, self._sign(run_id, row['task_id'], signed), run_id))
+        publish = bool(result.approved and store.branch(task.task_id))
+        if result.approved:
+            engine.start(task.task_id)
+            summary = 'Proposal approved; publishing to a branch.' if publish else 'Proposal approved; patch not applied.'
+            engine.complete(task.task_id, TaskResult(summary, details={'proposal_approved': True, 'patch_applied': False}))
+            store.update(run_id, state='completed', phase='finished')
+            if publish:
+                store.update_branch(task.task_id, publication='publishing', error=None)
+        else:
+            engine.cancel(task.task_id, reason='Proposal rejected by authorized approver.')
+            store.update(run_id, state='cancelled', phase='cancelled')
+        return result.to_dict(), publish
+
+    def _approve_repair(self, db, store, engine, run_id):
+        """Evidence that passed still goes through approval, under the policy's own name. A refusal stays with the owner."""
+        reason = 'CI repair passed QA and review. It reaches the open pull request; the owner still decides the merge.'
+        decision_input = json.dumps({'decision': 'approve', 'reason': reason}, sort_keys=True)
+        try:
+            with db.transaction():
+                row = store.get(run_id)
+                task = engine.get(row['task_id'])
+                if row['state'] != 'waiting' or task.status != 'waiting':
+                    return
+                _, publish = self._record_decision(db, store, engine, run_id, row, task, self.evidence(row),
+                                                   ApprovalPolicy(authorized_approvers={ci_repair.CI_REPAIR_ACTOR}),
+                                                   ci_repair.CI_REPAIR_ACTOR, 'approve', reason, decision_input)
+        except Exception:  # noqa: BLE001 - nothing was published: the proposal waits for the owner's decision instead
+            task = engine.get(store.get(run_id)['task_id'])
+            store.add_message(task.project_id, task.task_id, 'lead', dict(
+                message='Perbaikan CI ini tidak lolos persetujuan otomatis, jadi menunggu keputusan Anda.', questions=[]))
+            return
+        if publish:
+            self._submit_publish(run_id)
 
     # -- GitHub projects -----------------------------------------------------------------
 
