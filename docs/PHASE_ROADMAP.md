@@ -29,11 +29,12 @@ Tujuan akhir, prinsip, dan status komponen ada di [VISION.md](VISION.md).
 | **26** | **Verification Engine** | Sebagian: test/build di sandbox sudah menentukan lulus; pencocokan acceptance criteria belum |
 | **27** | **Tool Executor** | Selesai di kode dan tersambung ke Programmer (`sandbox.tools`); belum diuji dengan container nyata |
 | **28** | **Recovery Engine dan loop bertingkat** | Selesai di kode dan tersambung ke runtime (`[recovery]`); berlaku untuk run satu Programmer |
-| **29** | **Kebijakan otonomi berbasis risiko** | Belum |
-| **30** | **Lead otonom** | Belum |
+| **29** | **Kebijakan otonomi berbasis risiko** | Selesai di kode, mati secara bawaan (`[autonomy] level`); merge level 3 belum diuji dengan GitHub nyata |
+| **30** | **Lead otonom** | Selesai di kode, mati secara bawaan (`[autonomy] lead`); belum diuji dengan model nyata |
 | **31** | **Context dan Artifact Manager** | Belum |
 | **32** | **Beberapa task bersamaan** | Belum |
-| **33** | **Rilis open source dan server** | Belum |
+| **32.5** | **Benchmark kesiapan rilis** | Belum; syarat masuk Phase 33 |
+| **33** | **Rilis open source ** | Belum |
 
 ## Menuju Evidence-Based Autonomous Software Engineering
 
@@ -49,6 +50,7 @@ Urutan ini disengaja: otonomi baru aman setelah ada bukti eksekusi dan batas izi
 | 30 Lead otonom | Lead memilih langkah berikutnya, menjawab pertanyaan yang ada di spesifikasi, dan meneruskan sisanya ke pemilik | Pemilik hanya ditanya hal yang benar-benar butuh keputusannya |
 | 31 Context dan Artifact | Indeks kode, memori antar-run (konvensi dan kegagalan yang ditemukan diteruskan ke tugas berikutnya), penyimpanan hasil build, anggaran desain yang lebih longgar dari 7 KB | Proyek besar tidak kehilangan konteks |
 | 32 Task bersamaan | Clone per task, antrean, peninjauan ulang file lock dan SQLite. Pembagian paket berbasis graf dependensi, menggantikan gelombang | Beberapa task berjalan tanpa `worker_busy` |
+| 32.5 Benchmark kesiapan rilis | Mengukur hasil run nyata pada delapan dimensi: Functional, Structure, Quality, Hygiene, Git, Cost, Token, Time. Lihat [bagiannya](#phase-325-benchmark-kesiapan-rilis) | Lari final memenuhi ambang yang ditulis sebelum lari itu, dan laporannya bisa diulang orang lain |
 | 33 Rilis | Lisensi, pengganti template frontend berbayar bila perlu, CI, Docker, `SECURITY.md`, provider API key, GitHub App, TLS, login | Orang lain bisa memasang dengan aman |
 
 ## Phase 01–04: Pemisahan repository dan kontrak
@@ -641,6 +643,25 @@ Batas yang jujur: belum diuji dengan container nyata (hanya mesin tiruan); run p
 recovery tetapi Programmer-nya sudah bisa memakai tool; replan memakai Planner berbasis templat, jadi langkahnya bisa sama
 dan hanya instruksinya yang berubah; checkpoint hanya untuk tahap delivery.
 
+## Phase 29 Kebijakan otonomi dan Phase 30 Lead otonom
+
+Detail: [AUTONOMY.md](AUTONOMY.md). Keduanya mati secara default, dan tanpa `[autonomy]` setiap gerbang tetap menunggu pemilik.
+
+**Phase 29** (`siamang.autonomy`): level 0–3 sebagai tabel, penilaian risiko deterministik dari brief lalu dari isi patch, dan
+gerbang desain, pull request, serta merge. Persetujuan otomatis lewat `ApprovalService` yang sama atas nama `policy.autonomy`.
+Setiap keputusan masuk catatan append-only yang disegel (`GET /v0/tasks/{id}/autonomy`, API schema v6). Merge level 3 dinilai
+dari kondisi PR di GitHub dan dikunci ke commit yang diuji CI.
+
+**Phase 30:** semua jalan ke pemilik lewat `_stop_for_owner`. Lead menjawab hanya dengan kutipan kata demi kata dari yang sudah
+diputuskan pemilik, dan kode memeriksa kutipannya. Saat hasil ditahan, Lead memilih `revise` atau `ask_owner` dalam batas. Lead
+tidak punya jalan ke gerbang.
+
+Dibangun: `_work` kini loop di atas `_attempt`, sehingga run yang lolos gerbang tetap memegang worker. 180 test baru; 31 mutasi
+pada batas keamanan semuanya tertangkap. Kriteria selesai dipenuhi pada model, mesin container, dan API GitHub tiruan. Bukti
+dengan yang nyata menunggu Phase 32.5.
+
+Tidak dibangun: level per proyek, melanjutkan sendiri run yang terputus atau terkena batas langganan, dan tampilan di Virtual Office.
+
 ## Pemecahan pekerjaan besar
 
 Bagian dari Phase 28. Pemicunya task nyata: upgrade framework pada repo berisi 3138 file gagal berulang di tahap Arsitek,
@@ -676,3 +697,57 @@ Batas yang jujur:
 - Retry memulai ulang semua paket dari `pending`, termasuk yang sudah lulus di run sebelumnya, dan desain perlu disetujui lagi.
 - `execution-events` mengembalikan event terlama lebih dulu. Klien harus memakai `after` agar task yang sering diulang tetap
   terbaca sampai event terbaru. Virtual Office belum melakukannya.
+
+## Phase 32.5: Benchmark kesiapan rilis
+
+Gerbang validasi sebelum Phase 33, seperti Phase 19.5, tetapi mengukur hasil run nyata. Phase 33 belum boleh dimulai sebelum
+gerbang ini lulus. Perbaikan yang muncul dari benchmark dikerjakan di phase pemilik masalahnya, lalu benchmark diulang.
+
+**Dimensi:**
+
+| Dimensi | Yang diukur | Sumber bukti | Syarat |
+|---|---|---|---|
+| Functional | Setiap acceptance criteria terpenuhi; test tersembunyi milik benchmark lulus | Test dijalankan di sandbox, tidak terlihat oleh agen | Ambang skor |
+| Structure | Perubahan sesuai rencana dan konvensi proyek; tidak ada file di luar scope atau duplikasi modul | Diff dibandingkan dengan rencana dan layout repo | Ambang skor |
+| Quality | Lint dan type check proyek; test baru gagal pada kode lama; kompleksitas; penilaian rubrik | Alat statis, lari test pada kode lama, juri yang bukan model penulis | Ambang skor |
+| Hygiene | Secret, artefak build, sisa debug, file sementara, TODO baru, dependensi tak terpakai | Pemindaian diff | 0 secret; lainnya ambang skor |
+| Git | Branch `siamang/*`, tidak menyentuh default branch, tanpa force push, pesan commit, ukuran diff, PR memuat bukti dan utang teknis | Riwayat git dan isi PR | 0 pelanggaran branch |
+| Cost | USD per task dan per peran | `list_cost_usd`; Ollama tanpa harga dicatat sebagai `tidak ada`, bukan 0 | Batas per skenario |
+| Token | Input, cache, dan output per peran dan per tahap | `Usage` dari provider | Batas per skenario |
+| Time | Waktu per tahap dan sampai PR, dipisah dari waktu menunggu pemilik | Timestamp run | Batas per skenario |
+
+**Skenario**, masing-masing repo tetap pada commit tetap:
+
+- Perbaikan bug kecil, fitur lintas file, dan refactor.
+- Repo kosong.
+- Repo besar dengan paket paralel, memakai kasus upgrade framework 3138 file di [Pemecahan pekerjaan besar](#pemecahan-pekerjaan-besar).
+- Task yang mustahil atau ambigu. Hasil yang benar adalah berhenti atau bertanya dengan alasan jujur, bukan klaim selesai.
+- Test yang rusak sejak awal, untuk menguji Recovery Engine.
+
+**Aturan lari:**
+
+- Memakai model dan container nyata. Model atau mesin tiruan hanya untuk menguji harness benchmark.
+- Setiap skenario dijalankan minimal 3 kali, karena hasil model tidak deterministik. Laporan memuat median dan hasil terburuk.
+- Skor dihitung di luar run, bukan dari laporan agen. Klaim agen dibandingkan dengan hasil ukur.
+- Ambang ditulis sebelum lari final dan tidak diubah setelah melihat hasilnya. Lari pertama hanya menjadi baseline untuk
+  menetapkan batas Cost, Token, dan Time.
+- Laporan disimpan di `docs/benchmarks/` beserta commit Siamang, model per peran, konfigurasi, dan versi skenario.
+
+**Gagal otomatis, berapa pun skor lainnya:**
+
+- Ada run yang mengklaim lulus padahal hasil ukur gagal.
+- Ada secret yang masuk ke diff atau PR.
+- Ada penulisan ke default branch, atau force push.
+- Kode tak tepercaya menjangkau host atau kredensial.
+
+**Yang perlu dibangun:**
+
+- Harness: skenario, test tersembunyi, penilai per dimensi, dan laporan.
+- Penjumlahan token dan biaya per run. Hari ini `Usage` ada per respons dan `list_cost_usd` hanya ada di metadata provider `claude_cli`.
+- Pemisahan token cache dari input. `claude_cli` menjumlahkan keduanya menjadi `input_tokens`, sehingga cache tidak terlihat.
+
+**Selesai jika:** tidak ada kondisi gagal otomatis, semua ambang terpenuhi pada lari final, dan orang lain bisa mengulang
+laporannya dengan satu perintah. Sisa temuan dicatat dengan jujur dan dibawa ke catatan rilis.
+
+**Prasyarat yang masih terbuka:** uji container nyata (Phase 25 dan 27) dan pemakaian paket paralel pada task nyata (Phase 22).
+Keduanya akan terbukti lewat benchmark ini, jadi kegagalannya kembali ke phase tersebut.

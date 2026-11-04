@@ -43,6 +43,7 @@ Mulai dari sini sesuai kebutuhan Anda.
 | [LOOP.md](LOOP.md) | Loop Programmer, QA, dan Reviewer |
 | [APPROVAL.md](APPROVAL.md) | Keputusan manusia dan rantai bukti |
 | [SANDBOX.md](SANDBOX.md) | Test, build, dan tool Programmer di container |
+| [AUTONOMY.md](AUTONOMY.md) | Level otonomi, risiko, Lead otonom, catatan keputusan |
 
 ## Aturan menjaga dokumen
 

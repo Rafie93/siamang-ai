@@ -13,6 +13,19 @@ from dataclasses import replace
 
 from siamang.analyst import AnalysisRequest, SystemAnalyst
 from siamang.approval import ApprovalDecision, ApprovalPolicy, ApprovalRequest, ApprovalService
+from siamang.autonomy import (
+    AUTONOMY_ACTOR,
+    LEAD_ACTOR,
+    AutonomyPolicy,
+    Gate,
+    Risk,
+    RiskLevel,
+    Step,
+    assess_brief,
+    blockers_key,
+    next_step,
+    settle,
+)
 from siamang.ids import new_id
 from siamang.documents.author import (
     Document,
@@ -56,7 +69,7 @@ from siamang.tasks import TaskEngine, TaskFailure, TaskResult
 from siamang.tasks.definition import TaskRequest
 
 from .codec import decode, encode
-from . import ci_repair, recover, verify
+from . import autonomy, ci_repair, recover, verify
 from .parallel import ONE_ROUND, QA_POLICY, INTEGRATION_REVIEW, INPUT_DESIGN_BYTES, SPEC_BYTES, Merged, PackageRun, PackageStopped, commit_groups, merge_patches
 from .store import RunStore, now
 
@@ -68,6 +81,13 @@ class RuntimeRefusal(Exception):
 
 class Stopped(Exception):
     pass
+
+
+class Resume(Exception):
+    """No owner is needed: the same run goes on, in this mode, on the worker it already holds."""
+
+    def __init__(self, mode):
+        self.mode = mode
 
 
 # A real model writes whole files: it needs more time than the default, and to see more than a small file.
@@ -121,8 +141,9 @@ def _blockers(loop):
     return [f"{f.path or 'umum'}: {f.message} ({f.code})" for f in findings[:MAX_BLOCKERS]]
 
 
-def _pull_request_body(task, patch, loop, debt=''):
+def _pull_request_body(task, patch, loop, debt='', actor=None, report=None):
     qa, review = loop.final_qa_result, loop.final_review_result
+    ran, signed = autonomy.approver_note(actor, report)
     files = '\n'.join(f'- `{c.path}` ({c.operation})' for c in patch.changes)
     return redact(f'''## Task
 {task.description}
@@ -136,10 +157,10 @@ def _pull_request_body(task, patch, loop, debt=''):
 ## Pemeriksaan Siamang
 - QA: {qa.status if qa else 'tidak berjalan'} (pemeriksaan statis)
 - Reviewer: {review.status if review else 'tidak berjalan'} (pemeriksaan deterministik)
-- Siamang sendiri tidak menjalankan kode. Hasil build dan test nyata ada di tab Checks kalau repo punya workflow.
+{ran}
 
 {debt}
-Dibuat oleh Siamang setelah disetujui operator. Merge tetap keputusan pemilik repository.
+{signed}
 ''')
 
 
@@ -154,8 +175,9 @@ def _basis(task, spec, conversation, project):
 
 
 class Runtime:
-    def __init__(self, settings, models=None, authors=None, repos=None, verifier=None, tools=None, recovery=None):
+    def __init__(self, settings, models=None, authors=None, repos=None, verifier=None, tools=None, recovery=None, policy=None):
         self.settings = settings
+        self._autonomy = policy  # an AutonomyPolicy; tests inject one
         self._verifier = verifier
         self._tools = tools  # a ToolRunner for the Programmer; tests inject one
         self._recovery = recovery  # a RecoveryPolicy; tests inject one
@@ -244,6 +266,17 @@ class Runtime:
             return None
         return RecoveryPolicy(retries=rec.retries, advisor_rounds=rec.advisor_rounds, replans=rec.replans,
                               max_attempts=rec.max_attempts)
+
+    def autonomy(self):
+        """Which gates pass without the owner. Only the operator's file sets this, and every gate is human by default."""
+        if self._autonomy is not None:
+            return self._autonomy
+        if self._models is not None:
+            return AutonomyPolicy()
+        from siamang.config import load_config
+        auto = load_config(self.settings.config).autonomy
+        return AutonomyPolicy(level=auto.level, lead=auto.lead, lead_answers=auto.lead_answers,
+                              lead_revisions=auto.lead_revisions, merge_method=auto.merge_method)
 
     def open(self):
         self.settings.database.parent.mkdir(parents=True, exist_ok=True)
@@ -355,7 +388,7 @@ class Runtime:
             self._busy.release()
             raise
 
-    def _divide(self, db, store, engine, run_id, task, spec, conversation, repository, design, basis='', fresh=False):
+    def _divide(self, db, store, engine, run_id, task, spec, conversation, repository, design, basis='', fresh=False, lead=True):
         """The Analyst's division and its document. Returns ``False`` when the owner must answer first.
 
         The document says what really happened: a division that failed is never reported as one Programmer being enough.
@@ -386,14 +419,8 @@ class Runtime:
                     if d.status is DocumentStatus.GENERATED]), started, ended)
         work = division.plan
         if work and work.undecided:
-            store.add_message(task.project_id, task_id, 'lead', dict(
-                message='Sebelum tim dibagi, ada keputusan teknis yang belum disepakati.',
-                questions=[dict(question=q, options=[]) for q in work.undecided]))
-            with db.transaction():
-                if self._closing or engine.get(task_id).status == 'cancelled':
-                    raise Stopped()
-                engine.wait(task_id, reason='clarification_required')
-                store.update(run_id, state='waiting', phase='clarification', wait_reason='clarification_required')
+            self._stop_for_owner(db, store, engine, run_id, task, 'clarification_required',
+                                 'Sebelum tim dibagi, ada keputusan teknis yang belum disepakati.', work.undecided, lead=lead)
             return False
         store.set_work_packages(run_id, work.packages if work else ())
         if work and work.packages:
@@ -447,7 +474,7 @@ class Runtime:
                     conversation = store.messages(task.project_id, task_id)
                     if not self._divide(db, store, engine, run_id, task, spec, conversation,
                                         read_context(self._repos, project.root_path) if repo else None, design,
-                                        _basis(task, spec, conversation, project), fresh=True):
+                                        _basis(task, spec, conversation, project), fresh=True, lead=False):  # the owner is here
                         return
                 except Stopped:
                     return
@@ -472,6 +499,15 @@ class Runtime:
                                 (now(), run_id))
 
     def _work(self, run_id, mode='start'):
+        """One run on the single worker. It keeps the worker across a gate that passed, so no other task slips in."""
+        try:
+            while mode:
+                mode = self._attempt(run_id, mode)
+        finally:
+            self._busy.release()
+
+    def _attempt(self, run_id, mode):
+        """As far as this run gets. Returns the mode to go on in, or ``None`` when it stopped."""
         done = threading.Event()
         pulse = threading.Thread(target=self._heartbeat, args=(run_id, done), daemon=True)
         try:
@@ -577,18 +613,13 @@ class Runtime:
                 state['basis'] = _basis(task, spec, conversation, project)
                 briefed = len(reused_for('briefing')) == len(specs_for('briefing', Source.AUTHORED))  # the Lead already cleared this
                 if gated and repo and self.author('lead') and not briefed and not store.draft_of_task(task_id):  # a draft already asked
-                    rounds = sum(1 for m in store.messages(task.project_id, task_id) if m['role'] == 'lead')
+                    # Only what the Lead really asked: an answer it settled itself is not a round of questions.
+                    rounds = sum(1 for m in store.messages(task.project_id, task_id) if m['role'] == 'lead' and m.get('questions'))
                     reply = ask_lead(self.author('lead'), TASK_PROMPT,
                                      brief | dict(rounds_left=max(MAX_TASK_ROUNDS - rounds, 0)))
                     if not reply.ready and rounds < MAX_TASK_ROUNDS:
-                        store.add_message(task.project_id, task_id, 'lead', reply.payload())
-                        with db.transaction():
-                            if self._closing or engine.get(task_id).status == 'cancelled':
-                                raise Stopped()
-                            engine.wait(task_id, reason='clarification_required')
-                            store.update(run_id, state='waiting', phase='clarification',
-                                         wait_reason='clarification_required')
-                        return
+                        self._stop_for_owner(db, store, engine, run_id, task, 'clarification_required', reply.message, reply.questions)
+                        return None
                 if gated:
                     design = []
                     for stage in DESIGN_STAGES:
@@ -596,13 +627,8 @@ class Runtime:
                         design += documents(stage, brief | dict(prior_documents=prior), required=True)
                     if not self._divide(db, store, engine, run_id, task, spec, conversation,
                                         brief['repository'] if repo else None, design, state['basis']):
-                        return
-                    with db.transaction():
-                        if self._closing or engine.get(task_id).status == 'cancelled':
-                            raise Stopped()
-                        engine.wait(task_id, reason='design_approval')
-                        store.update(run_id, state='waiting', phase='design_approval', wait_reason='design_approval')
-                    return
+                        return None
+                    return self._design_gate(db, store, engine, run_id, task)
                 design = stored
 
                 class TrackedProgrammer(Programmer):
@@ -633,7 +659,7 @@ class Runtime:
                     phase('programming', 1)
                     delivered = self._deliver_packages(db, store, engine, run_id, task, ids, plan, project, spec, conversation, design)
                     if delivered is None:
-                        return
+                        return None
                     loop, analysis, programmer = delivered
                 else:
                     base_input = (design_input(design) | ({'project_spec': clip_bytes(spec)} if spec else {})
@@ -719,15 +745,9 @@ class Runtime:
                 if str(loop.stop_reason) == 'programmer_waiting':
                     # The Programmer needs a decision: it reaches the owner, and the answer returns to it.
                     asked = programmer.last
-                    store.add_message(task.project_id, task_id, 'lead', dict(
-                        message=asked.summary, questions=[dict(question=q, options=[]) for q in asked.unknowns
-                                                          if not q.startswith(SYSTEM_NOTES)][:6]))
-                    with db.transaction():
-                        if self._closing or engine.get(task_id).status == 'cancelled':
-                            raise Stopped()
-                        engine.wait(task_id, reason='clarification_required')
-                        store.update(run_id, state='waiting', phase='clarification', wait_reason='clarification_required')
-                    return
+                    self._stop_for_owner(db, store, engine, run_id, task, 'clarification_required', asked.summary,
+                                         [q for q in asked.unknowns if not q.startswith(SYSTEM_NOTES)][:6])
+                    return None
                 patch, qa, review = loop.final_patch, loop.final_qa_result, loop.final_review_result
                 store.save_documents(run_id, task_id, programmer_documents(patch) + qa_documents(qa) + review_documents(review))
                 changes = [dict(path=c.path, operation=str(c.operation), after_content=clip(c.after_content or ''))
@@ -745,6 +765,9 @@ class Runtime:
                 seal = self._sign(run_id, task_id, bundle)
                 made = thaw(programmer.last.metadata) if getattr(programmer, 'last', None) else {}
                 sandbox = {k[len('sandbox_'):]: v for k, v in made.items() if k.startswith('sandbox_')}
+                silenced = ci_repair.silencing_reason(patch, project.root_path) if repair and loop.passed else None
+                unproven = verifier is not None and loop.passed and not (verification and verification.passed)
+                passed = loop.passed and not silenced and not unproven
                 report = json.dumps(dict(plan=plan.to_dict(), analysis=analysis.to_dict(), loop=loop.to_dict(),
                                         **(dict(verification=verification.to_dict()) if verification else {}),
                                         **(dict(programmer_sandbox=sandbox) if sandbox else {}),
@@ -760,31 +783,32 @@ class Runtime:
                                                          details={'cause': str(error.get('code', 'unknown')),
                                                                   'reason': str(error.get('message', ''))[:300]}))
                         store.update(run_id, state='failed', phase='failed')
-                        return
-                    silenced = ci_repair.silencing_reason(patch, project.root_path) if repair and loop.passed else None
-                    unproven = verifier is not None and loop.passed and not (verification and verification.passed)
-                    passed = loop.passed and not silenced and not unproven
-                    reason = 'approval_required' if passed else 'quality_gate'
-                    if silenced:
-                        store.add_message(task.project_id, task_id, 'lead', dict(
-                            message='Perbaikan CI ini ditahan dan tidak dikirim, karena tampak menyembunyikan kegagalan.',
-                            questions=[dict(question=silenced, options=[])]))
-                    elif unproven:
-                        store.add_message(task.project_id, task_id, 'lead', dict(
-                            message=verify.blocked_message(verification) if verification else 'Verifikasi tidak berjalan.',
-                            questions=[dict(question=b, options=[]) for b in (verification.blockers() if verification else [])]))
-                    elif not loop.passed:
-                        store.add_message(task.project_id, task_id, 'lead', dict(
-                            message=f'QA dan Reviewer masih menahan hasil ini setelah {len(loop.iterations)} putaran. '
-                                    'Beri arahan dan Programmer mengerjakannya lagi, atau batalkan task ini.',
-                            questions=[dict(question=b, options=[]) for b in _blockers(loop)]))
-                    engine.wait(task_id, reason=reason)
-                    store.update(run_id, state='waiting', phase='awaiting_approval' if passed else 'blocked',
-                                 wait_reason=reason)
+                        return None
                 if recovered:
                     checkpoint.clear(key)  # the result is saved: a later attempt must not reuse it
-                if repair and passed:
-                    self._approve_repair(db, store, engine, run_id)
+                if silenced:
+                    self._stop_for_owner(db, store, engine, run_id, task, 'quality_gate',
+                                         'Perbaikan CI ini ditahan dan tidak dikirim, karena tampak menyembunyikan kegagalan.', [silenced])
+                elif unproven:
+                    self._stop_for_owner(db, store, engine, run_id, task, 'quality_gate',
+                                         verify.blocked_message(verification) if verification else 'Verifikasi tidak berjalan.',
+                                         verification.blockers() if verification else [],
+                                         revisable=not recovered and bool(verification) and verification.status == 'failed')
+                elif not loop.passed:
+                    self._stop_for_owner(db, store, engine, run_id, task, 'quality_gate',
+                                         f'QA dan Reviewer masih menahan hasil ini setelah {len(loop.iterations)} putaran. '
+                                         'Beri arahan dan Programmer mengerjakannya lagi, atau batalkan task ini.',
+                                         _blockers(loop), revisable=not recovered)
+                else:
+                    with db.transaction():
+                        if self._closing or engine.get(task_id).status == 'cancelled':
+                            raise Stopped()
+                        engine.wait(task_id, reason='approval_required')
+                        store.update(run_id, state='waiting', phase='awaiting_approval', wait_reason='approval_required')
+                    self._publish_gate(db, store, engine, run_id, task, project, patch, verification, recovered, repair)
+                return None
+        except Resume as resume:
+            return resume.mode
         except BaseException as exc:
             with Database(self.settings.database) as db:
                 engine, store = TaskEngine(db, ProjectRegistry(db)), RunStore(db)
@@ -809,7 +833,7 @@ class Runtime:
             done.set()
             if pulse.is_alive():
                 pulse.join()
-            self._busy.release()
+        return None
 
     @staticmethod
     def _checkpoint_key(task, spec, conversation, design):
@@ -818,9 +842,178 @@ class Runtime:
                            default=str)
         return f"{task.task_id}-{hashlib.sha256(brief.encode()).hexdigest()[:16]}"
 
-    def _stop_for_owner(self, db, store, engine, run_id, task, reason, message, questions):
+    # -- the gates: what passes without the owner, and the record of it -------------------------
+
+    def _decide(self, store, run_id, task_id, gate, outcome, actor, *, risk='', reasons=(), payload=None, evidence=''):
+        store.add_decision(run_id, task_id, sign=self._sign, gate=str(gate), level=self.autonomy().level, risk=str(risk),
+                           outcome=outcome, actor=actor, reasons=reasons, payload=payload, evidence=evidence)
+
+    def decisions(self, store, task_id):
+        return store.decisions(task_id, sign=self._sign)
+
+    def _still_ours(self, engine, task_id):
+        if self._closing or engine.get(task_id).status == 'cancelled':
+            raise Stopped()
+
+    def _design_gate(self, db, store, engine, run_id, task):
+        """Every design stops here and is assessed. Returns ``'code'`` when the policy passes it."""
+        policy, packages = self.autonomy(), store.work_packages(run_id)
+        failed = any(d['kind'] == 'work_packages' and d['status'] == 'failed' for d in store.documents(task.task_id, run_id))
+        verdict = policy.design(assess_brief(task.description, [o for p in packages for o in json.loads(p['owns'])], len(packages)),
+                                division_failed=failed)
+        with db.transaction():
+            self._still_ours(engine, task.task_id)
+            self._decide(store, run_id, task.task_id, Gate.DESIGN, 'auto' if verdict.allowed else 'held',
+                         AUTONOMY_ACTOR, risk=verdict.risk, reasons=verdict.reasons, evidence=store.documents_digest(run_id))
+            engine.wait(task.task_id, reason='design_approval')
+            store.update(run_id, state='waiting', phase='design_approval', wait_reason='design_approval')
+            if verdict.allowed:  # the same record a person leaves, under the policy's own name
+                store.record_design_decision(run_id, 'approve', verdict.approval_reason, AUTONOMY_ACTOR)
+                store.update(run_id, state='scheduled', phase='queued')
+        if verdict.allowed:
+            return 'code'
+        if policy.gate_open(Gate.DESIGN):
+            store.add_message(task.project_id, task.task_id, 'lead', dict(message=autonomy.held_message(verdict), questions=[]))
+        return None
+
+    def _publish_gate(self, db, store, engine, run_id, task, project, patch, verification, recovered, repair):
+        """Judged on the patch itself. Every run records its risk: a later merge reads it, whoever approved."""
+        policy = self.autonomy()
+        try:
+            risk = autonomy.patch_risk(patch, project.root_path)
+        except Exception as exc:  # noqa: BLE001 - the run is already waiting for approval: it stays there, held
+            risk = Risk(RiskLevel.HIGH, (f'Penilaian risiko gagal ({type(exc).__name__}).',))
+        if repair:
+            self._decide(store, run_id, task.task_id, Gate.PUBLISH, 'auto', ci_repair.CI_REPAIR_ACTOR, risk=risk.level,
+                         reasons=risk.reasons, evidence=patch.content_hash)
+            return self._approve_repair(db, store, engine, run_id)
+        verdict = policy.publish(risk, test_passed=autonomy.test_passed(verification), has_branch=bool(store.branch(task.task_id)),
+                                 compromises=autonomy.compromises(recovered))
+        self._decide(store, run_id, task.task_id, Gate.PUBLISH, 'auto' if verdict.allowed else 'held', AUTONOMY_ACTOR,
+                     risk=verdict.risk, reasons=verdict.reasons, evidence=patch.content_hash)
+        if verdict.allowed:
+            return self._approve_by_policy(db, store, engine, run_id, AUTONOMY_ACTOR, verdict.approval_reason,
+                                           'Hasil ini lolos kebijakan otomatis tetapi tidak lolos pemeriksaan bukti, jadi menunggu keputusan Anda.')
+        if policy.gate_open(Gate.PUBLISH):
+            store.add_message(task.project_id, task.task_id, 'lead', dict(message=autonomy.held_message(verdict), questions=[]))
+        return None
+
+    def _merge_gate(self, store, task, sha, runs, ci_state):
+        """Level 3 only. Judged on what GitHub says now about the whole branch; a refusal leaves the pull request open."""
+        policy = self.autonomy()
+        if not policy.gate_open(Gate.MERGE):
+            return
+        task_id, run_id = task.task_id, store.latest(task.task_id)['run_id']
+        repo, branch = store.repo(task.project_id), store.branch(task_id)
+
+        def tell(message):
+            for target in {task_id, (ci_repair.info(task) or {}).get('root_task_id', task_id)}:
+                store.add_message(task.project_id, target, 'lead', dict(message=message, questions=[]))
+
+        def held(reasons):
+            self._decide(store, run_id, task_id, Gate.MERGE, 'held', AUTONOMY_ACTOR, reasons=reasons, evidence=f'commit:{sha}')
+            tell('Kebijakan otomatis tidak melakukan merge. Pull request menunggu keputusan Anda.\n' + '\n'.join(f'- {r}' for r in reasons[:8]))
+
+        try:
+            pull = self._repos.pull_request_details(repo['repository'], branch['branch'])
+        except RepoError as exc:
+            return held([f'Status pull request tidak terbaca ({exc.code}).'])
+        if pull is None:
+            return held(['Pull request tidak ditemukan.'])
+        if pull.state != 'OPEN':
+            return None  # merged or closed: the owner already decided
+        verdict = policy.merge(autonomy.branch_risk(store, store.branch_tasks(task.project_id, branch['branch']), pull),
+                               ci_state=ci_state, ci_passed=ci_state == 'success' and autonomy.ci_passed(runs),
+                               open_at_tested_commit=pull.head_sha == sha and not pull.draft,
+                               base_is_default=pull.base == repo['default_branch'], reviewers_object=pull.review == 'CHANGES_REQUESTED')
+        if not verdict.allowed:
+            self._decide(store, run_id, task_id, Gate.MERGE, 'held', AUTONOMY_ACTOR, risk=verdict.risk, reasons=verdict.reasons,
+                         evidence=f'commit:{sha}')
+            tell(autonomy.held_message(verdict))
+            return None
+        # Written before the merge: an action this hard to undo must never happen without a record.
+        self._decide(store, run_id, task_id, Gate.MERGE, 'auto', AUTONOMY_ACTOR, risk=verdict.risk, reasons=verdict.reasons,
+                     evidence=f'commit:{sha}', payload=dict(pull_request=pull.number, method=policy.merge_method))
+        try:
+            self._repos.merge_pull_request(repo['repository'], pull.number, head_sha=sha, method=policy.merge_method)
+        except RepoError as exc:
+            self._decide(store, run_id, task_id, Gate.MERGE, 'merge_failed', AUTONOMY_ACTOR, risk=verdict.risk,
+                         reasons=(exc.code,), evidence=f'commit:{sha}')
+            return tell(f'GitHub menolak merge otomatis ({exc.code}). Pull request tetap terbuka untuk Anda.')
+        return tell(f'Pull request #{pull.number} di-merge otomatis setelah CI lulus. Dasarnya kebijakan level {policy.level}, '
+                    f'risiko {verdict.risk}. Commit {sha[:12]}.')
+
+    # -- the Lead: every stop short of an approval passes here ----------------------------------
+
+    def _lead_thinking(self, db, store, engine, run_id, task):
+        with db.transaction():
+            self._still_ours(engine, task.task_id)
+            store.update(run_id, state='running', phase='deciding')
+
+    def _resume(self, db, store, engine, run_id, task, reason):
+        with db.transaction():
+            self._still_ours(engine, task.task_id)
+            engine.wait(task.task_id, reason=reason)
+            store.update(run_id, state='scheduled', phase='queued')
+        # As an answer from the owner would: an approved design stays approved.
+        raise Resume('code' if store.design_approved(run_id) else 'start')
+
+    def _lead_questions(self, db, store, engine, run_id, task, message, questions):
+        """Returns what still has to reach the owner. Raises ``Resume`` when nothing does."""
+        policy, router = self.autonomy(), self.author('lead')
+        if not policy.lead or router is None or not questions:
+            return message, questions
+        self._lead_thinking(db, store, engine, run_id, task)
+        answered = [d for d in store.decisions(task.task_id) if d['gate'] == 'question' and d['outcome'] == 'answered']
+        sources = autonomy.sources(store, task)
+        resolved = settle(router, questions, sources, policy.lead_answers - len(answered),
+                          frozenset(d['payload']['key'] for d in answered))
+        evidence = hashlib.sha256(json.dumps(sources, sort_keys=True).encode()).hexdigest()
+        with db.transaction():
+            self._still_ours(engine, task.task_id)
+            for r in resolved:
+                self._decide(store, run_id, task.task_id, 'question', 'answered' if r.answered else 'forwarded', LEAD_ACTOR,
+                             payload=r.to_dict(), evidence=evidence)
+        done = [r for r in resolved if r.answered]
+        left = [dict(r.question, lead_reason=r.reason) for r in resolved if not r.answered]
+        if done:
+            store.add_message(task.project_id, task.task_id, 'lead', dict(
+                message=autonomy.answered_message(done), questions=[], resolved=[r.to_dict() for r in done]))
+        if not left:
+            self._resume(db, store, engine, run_id, task, 'clarification_required')
+        return message, left
+
+    def _lead_next_step(self, db, store, engine, run_id, task, blockers):
+        """Send held work back with a direction, within a budget. Returns why the owner is needed, or ``''``."""
+        policy, router = self.autonomy(), self.author('lead')
+        if not policy.lead or router is None or not blockers or not policy.lead_revisions:
+            return ''
+        revisions = [d for d in store.decisions(task.task_id) if d['gate'] == 'next_step' and d['outcome'] == 'revise']
+        mark = blockers_key(blockers)
+        if any(d['payload']['blockers'] == mark for d in revisions):
+            step = Step('ask_owner', reason='Arahan sebelumnya tidak mengubah temuannya, jadi mengulang tidak akan membantu.')
+        elif len(revisions) >= policy.lead_revisions:
+            step = Step('ask_owner', reason=f'Lead sudah mengembalikan pekerjaan ini {len(revisions)} kali.')
+        else:
+            self._lead_thinking(db, store, engine, run_id, task)
+            step = next_step(router, task.description, blockers)
+        self._decide(store, run_id, task.task_id, 'next_step', step.action if step.action == 'revise' else 'forwarded', LEAD_ACTOR,
+                     reasons=(step.reason,) if step.reason else (), payload=dict(blockers=mark, direction=step.direction))
+        if step.action != 'revise':
+            return step.reason
         store.add_message(task.project_id, task.task_id, 'lead', dict(
-            message=message, questions=[dict(question=q, options=[]) for q in questions][:12]))
+            message=f'Arahan Lead untuk Programmer: {step.direction}', questions=[]))
+        return self._resume(db, store, engine, run_id, task, 'quality_gate')
+
+    def _stop_for_owner(self, db, store, engine, run_id, task, reason, message, questions, *, revisable=False, lead=True):
+        """The one way a run reaches the owner. ``revisable``: more work could clear this, so the Lead may try that first."""
+        questions = autonomy.as_questions(questions)
+        if lead and reason == 'clarification_required':
+            message, questions = self._lead_questions(db, store, engine, run_id, task, message, questions)
+        elif lead and revisable:
+            why = self._lead_next_step(db, store, engine, run_id, task, [q['question'] for q in questions])
+            message = f'{message}\n\nAlasan Lead meneruskan ini ke Anda: {why}' if why else message
+        store.add_message(task.project_id, task.task_id, 'lead', dict(message=message, questions=questions[:12]))
         with db.transaction():
             if self._closing or engine.get(task.task_id).status == 'cancelled':
                 raise Stopped()
@@ -855,7 +1048,7 @@ class Runtime:
                 held += [f"{r['title']}: gagal ({r['error']})" for r in unfinished if r['state'] == 'failed']
                 self._stop_for_owner(db, store, engine, run_id, task, 'quality_gate',
                                      'Sebagian paket kerja belum lulus. Paket yang sudah lulus tetap disimpan; '
-                                     'beri arahan dan hanya paket ini yang dikerjakan lagi.', held)
+                                     'beri arahan dan hanya paket ini yang dikerjakan lagi.', held, revisable=True)
                 return None
             patches = [decode(json.loads(r['patch'])) for r in rows]
             summary = 'Gabungan paket kerja: ' + '; '.join(r['title'] for r in rows)
@@ -931,17 +1124,27 @@ class Runtime:
                                     questions=[]))
                         else:
                             self._note_ci_recovered(store, task)
+                            self._try_merge(store, task, sha, runs, 'success')
                         return
                     store.set_ci(task_id, sha, 'watching', runs)
                 elif runs == [] and waited > CI_NO_WORKFLOW_SECS:
                     store.set_ci(task_id, sha, 'none')
+                    self._try_merge(store, task, sha, (), 'none')
                     return
                 if waited > CI_TIMEOUT_SECS:
                     store.set_ci(task_id, sha, 'timeout', runs or ())
+                    self._try_merge(store, task, sha, runs or (), 'timeout')
                     return
                 self._ci_wake.wait(self.ci_poll_secs)
 
     ci_poll_secs = CI_POLL_SECS
+
+    def _try_merge(self, store, task, sha, runs, ci_state):
+        try:
+            self._merge_gate(store, task, sha, runs, ci_state)
+        except Exception as exc:  # noqa: BLE001 - a background job has no caller: the owner hears of it, and nothing merged
+            store.add_message(task.project_id, task.task_id, 'lead', dict(
+                message=f'Pemeriksaan merge otomatis gagal ({type(exc).__name__}). Pull request tetap terbuka.', questions=[]))
 
     @staticmethod
     def _note_ci_recovered(store, task):
@@ -1106,8 +1309,12 @@ class Runtime:
         return result.to_dict(), publish
 
     def _approve_repair(self, db, store, engine, run_id):
+        return self._approve_by_policy(db, store, engine, run_id, ci_repair.CI_REPAIR_ACTOR,
+                                       'CI repair passed QA and review. It reaches the open pull request; the owner still decides the merge.',
+                                       'Perbaikan CI ini tidak lolos persetujuan otomatis, jadi menunggu keputusan Anda.')
+
+    def _approve_by_policy(self, db, store, engine, run_id, actor, reason, refused):
         """Evidence that passed still goes through approval, under the policy's own name. A refusal stays with the owner."""
-        reason = 'CI repair passed QA and review. It reaches the open pull request; the owner still decides the merge.'
         decision_input = json.dumps({'decision': 'approve', 'reason': reason}, sort_keys=True)
         try:
             with db.transaction():
@@ -1116,12 +1323,11 @@ class Runtime:
                 if row['state'] != 'waiting' or task.status != 'waiting':
                     return
                 _, publish = self._record_decision(db, store, engine, run_id, row, task, self.evidence(row),
-                                                   ApprovalPolicy(authorized_approvers={ci_repair.CI_REPAIR_ACTOR}),
-                                                   ci_repair.CI_REPAIR_ACTOR, 'approve', reason, decision_input)
+                                                   ApprovalPolicy(authorized_approvers={actor}),
+                                                   actor, 'approve', reason, decision_input)
         except Exception:  # noqa: BLE001 - nothing was published: the proposal waits for the owner's decision instead
             task = engine.get(store.get(run_id)['task_id'])
-            store.add_message(task.project_id, task.task_id, 'lead', dict(
-                message='Perbaikan CI ini tidak lolos persetujuan otomatis, jadi menunggu keputusan Anda.', questions=[]))
+            store.add_message(task.project_id, task.task_id, 'lead', dict(message=refused, questions=[]))
             return
         if publish:
             self._submit_publish(run_id)
@@ -1312,7 +1518,8 @@ class Runtime:
                 pull = self._repos.find_pull_request(repo['repository'], branch['branch'])
                 if pull is None or pull.state != 'OPEN':
                     pull = self._repos.open_pull_request(repo['repository'], branch['branch'], base=repo['default_branch'],
-                                                         title=title, body=_pull_request_body(task, patch, loop, recover.debt_of(row['report'])))
+                                                         title=title, body=_pull_request_body(task, patch, loop, recover.debt_of(row['report']),
+                                                                                              row['decision_actor'], row['report']))
             except RepoError as exc:
                 with db.transaction():
                     store.update_branch(task_id, publication='failed', error=exc.code)

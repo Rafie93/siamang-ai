@@ -8,8 +8,10 @@ The read-only :mod:`siamang.git.client` stays as it is. This is the second Git b
 * credentials come from ``gh`` per call; the user's Git config is never changed;
 * **pushes only reach ``siamang/*`` branches**, and never the default branch, with one exception:
   the first commit of a repository that has no branch at all. A pull request needs a base, and
-  there is nothing to overwrite. Nothing here merges, force-pushes, deletes a remote branch, or
-  changes repository settings;
+  there is nothing to overwrite. Nothing here force-pushes, deletes a remote branch, or changes
+  repository settings;
+* **one merge, pinned to a commit.** :meth:`RepoClient.merge_pull_request` is called only at autonomy
+  level 3, after that policy passed, and GitHub refuses it if the branch moved after the tested commit;
 * errors carry a fixed code. Git and gh output is never repeated, as it can hold credentials.
 """
 from __future__ import annotations
@@ -27,6 +29,8 @@ REPOSITORY_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}
 BRANCH_RE = re.compile(r'siamang/[a-z0-9][a-z0-9-]{0,80}')
 # Default branches come from GitHub and reach `git fetch` as data: no options, no refspec syntax.
 BASE_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,200}')
+COMMIT_RE = re.compile(r'[0-9a-f]{40}')
+MERGE_METHODS = ('squash', 'merge', 'rebase')
 ENV_ALLOWLIST = ('PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TMPDIR', 'GH_CONFIG_DIR', 'XDG_CONFIG_HOME')
 CLONE_TIMEOUT = 300
 PUSH_TIMEOUT = 180
@@ -52,6 +56,19 @@ class PullRequest:
     number: int
     url: str
     state: str  # OPEN, CLOSED, MERGED
+
+
+@dataclass(frozen=True)
+class PullDetails:
+    """What GitHub reports now. A merge is judged on this, never on what Siamang remembers having pushed."""
+    number: int
+    state: str
+    head_sha: str
+    base: str
+    draft: bool
+    review: str  # APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, or empty
+    files: tuple[str, ...]
+    lines: int
 
 
 def _check_repository(repository):
@@ -276,3 +293,27 @@ class RepoClient:
         if found is None:
             raise RepoError('pull_request_failed')
         return found
+
+    def pull_request_details(self, repository, branch) -> PullDetails | None:
+        _check_repository(repository)
+        _check_branch(branch)
+        rows = self._gh_json('pr', 'list', '--repo', repository, '--head', branch, '--state', 'all', '--limit', '1', '--json',
+                             'number,state,headRefOid,baseRefName,isDraft,reviewDecision,files', code='pull_request_lookup_failed')
+        if not isinstance(rows, list) or not rows:
+            return None
+        row = rows[0]
+        try:
+            files = row.get('files') or ()
+            return PullDetails(row['number'], row['state'], row['headRefOid'], row['baseRefName'], bool(row.get('isDraft')),
+                               row.get('reviewDecision') or '', tuple(f['path'] for f in files),
+                               sum(f.get('additions', 0) + f.get('deletions', 0) for f in files))
+        except (KeyError, TypeError, AttributeError):
+            raise RepoError('pull_request_lookup_failed') from None
+
+    def merge_pull_request(self, repository, number, *, head_sha, method='squash'):
+        """Merge exactly the commit that was tested: GitHub refuses it if the branch has moved since."""
+        _check_repository(repository)
+        if type(number) is not int or not COMMIT_RE.fullmatch(head_sha or '') or method not in MERGE_METHODS:
+            raise RepoError('invalid_merge')
+        self._run(['gh', 'pr', 'merge', str(number), '--repo', repository, f'--{method}', '--match-head-commit', head_sha],
+                  timeout=PUSH_TIMEOUT, code='pull_request_merge_failed')

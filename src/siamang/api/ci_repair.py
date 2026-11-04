@@ -57,7 +57,7 @@ def info(task) -> dict | None:
     return dict(value) if value else None
 
 
-def _current(root, path: str) -> str:
+def current_text(root, path: str) -> str:
     target = Path(root) / path
     return target.read_text(encoding='utf-8', errors='replace') if target.is_file() and not target.is_symlink() else ''
 
@@ -72,7 +72,7 @@ def silencing_reason(patch, root) -> str | None:
             continue
         if deleted:
             return f'{path}: perbaikan CI tidak boleh menghapus test'
-        before, after = Counter(_current(root, path).splitlines()), Counter((change.after_content or '').splitlines())
+        before, after = Counter(current_text(root, path).splitlines()), Counter((change.after_content or '').splitlines())
         added, removed = after - before, before - after
         if any(_SKIP.search(line) for line in added):
             return f'{path}: perbaikan CI tidak boleh melewati test'

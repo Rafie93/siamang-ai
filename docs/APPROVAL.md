@@ -12,6 +12,8 @@ stdlib-only. No schema change (v3), no contract change (v0.2: the existing
 > approved automatically, and nothing can be overridden. Not one byte of
 > the proposed patch changes.
 
+> **Policy approvals.** At autonomy level 2 and above the runtime can approve a proposal as `policy.autonomy` ([AUTONOMY.md](AUTONOMY.md)). It uses this same service, so the evidence requirements still have no override.
+>
 > **Automatic repairs.** The HTTP runtime approves a passing CI repair through this same service, as the authorized policy actor `policy.ci-repair` ([HTTP_API.md](HTTP_API.md)). Nothing here changed: no approval is implicit, and the evidence requirements still have no override.
 >
 > **Current state and direction.** This document describes the code as it is today. The HTTP runtime ([HTTP_API.md](HTTP_API.md)) publishes approved work as a branch and pull request. Which limits here will change, and when, is in [VISION.md](VISION.md).

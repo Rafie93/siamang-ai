@@ -10,7 +10,7 @@ Know these limits before running it:
 
 - Agents read repository content and send it to the model provider you configure.
 - Siamang pushes to GitHub with your `gh` login, only to `siamang/*` branches, without
-  force or merge. When CI fails on an open pull request, it pushes a repair to that branch
+  force, and without a merge unless the operator set `[autonomy] level = 3`. When CI fails on an open pull request, it pushes a repair to that branch
   without asking, up to `ci_repair` times. Set `ci_repair = 0` to turn this off.
 - CI logs are project output and reach the model as data. Treat them as untrusted.
 - Review generated pull requests before merging. By default QA is static and Siamang does not

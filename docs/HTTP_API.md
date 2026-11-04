@@ -3,7 +3,8 @@
 Implemented on 12 October 2026. The API is a separate optional FastAPI transport
 over the existing Python services. It produces engineering proposals, static QA,
 review, and explicit approval decisions. For GitHub projects an approved patch becomes a commit on the
-task's branch and a pull request. It never merges, runs project code, opens a shell, or deploys.
+task's branch and a pull request. It never opens a shell or deploys. By default it does not merge or run project code; the
+operator's file can turn on a sandbox ([SANDBOX.md](SANDBOX.md)) and policy gates up to a merge ([AUTONOMY.md](AUTONOMY.md)).
 
 ## Install and start
 
@@ -20,7 +21,7 @@ missing credentials or a seal key fail closed, rather than starting anonymously.
 
 `SIAMANG_CONFIG` selects the usual TOML config. `SIAMANG_STORAGE_PATH` overrides
 the database path. The API adds versioned supplemental tables to the core SQLite
-database: `api_schema` (v4), `api_runs`, append-only `api_run_events`, `api_features`, `api_task_features`, `api_documents`, and `api_design_decisions`. Core
+database: `api_schema` (v6), `api_autonomy_decisions`, `api_runs`, append-only `api_run_events`, `api_features`, `api_task_features`, `api_documents`, and `api_design_decisions`. Core
 schema remains v3 and lifecycle contract remains v0.2. Back up the database
 before first use on an existing installation. No user database was migrated as
 part of development or validation.
@@ -198,6 +199,13 @@ No repair starts, and the task receives a message saying why, when the attempts 
 durations do not count), the log cannot be read, or the branch moved since that build. A merged or closed pull request ends it silently. A
 repair that finds the worker busy waits up to an hour; after a restart it stays queued and `POST /v0/tasks/{id}/run` starts it.
 
+### Autonomy
+
+`[autonomy]` in the operator's file sets which gates pass by policy and what the Lead may settle ([AUTONOMY.md](AUTONOMY.md)). Off by default.
+`GET /v0/tasks/{id}/autonomy` (`read`) returns `level`, `lead`, and `items`: every sealed decision with `gate`, `risk`, `outcome`, `actor`,
+`reasons`, `payload`, `evidence`, `decided_at`, and `seal_valid`. `/v0/capabilities` adds `autonomy`, reports `publishing` as `merge_by_policy` at
+level 3, and lists the phase `deciding`. A question the Lead forwards may carry `lead_reason`; a message may carry `resolved`.
+
 ### When a run stops
 
 Each task gets a `siamang/*` branch. A run that stops short of an approval says why, and
@@ -219,7 +227,7 @@ offered as a pull request. `task.branch.publication` is `none`, `publishing`, `p
 `revises_task_id` on `POST /v0/tasks` joins the base task's branch while its pull request is open.
 After a merge or close, the revision uses its own branch from the default branch.
 
-Guarantees from `siamang.repos.client`: pushes reach only `siamang/*` branches, never force, and never merge. Agent
+Guarantees from `siamang.repos.client`: pushes reach only `siamang/*` branches and never force. It merges only at autonomy level 3, pinned to the tested commit. Agent
 documents and the spec stay in Siamang's database. The pull request carries the task text, patch
 summary, file list, and static check status, so those are visible to anyone who can see the repository.
 `patch_application: false` in capabilities still means nothing is applied to a registered local folder or a default branch.

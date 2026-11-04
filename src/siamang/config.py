@@ -99,6 +99,17 @@ class RecoveryConfig:
 
 
 @dataclass(frozen=True)
+class AutonomyConfig:
+    """Phase 29-30: which gates pass without the owner, and what the Lead may settle. Off keeps every gate human."""
+
+    level: int = 0  # 0 owner decides everything, 1 low-risk design, 2 also the pull request, 3 also a low-risk merge
+    lead: bool = False  # the Lead answers what the owner already decided and sends held work back
+    lead_answers: int = 6  # questions the Lead answers per task (0-20)
+    lead_revisions: int = 1  # times per task the Lead sends held work back (0-3)
+    merge_method: str = "squash"  # level 3: squash, merge, or rebase
+
+
+@dataclass(frozen=True)
 class ProviderConfig:
     type: str
     name: str = ""
@@ -136,6 +147,7 @@ class Config:
     router: RouterConfig = field(default_factory=RouterConfig)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     recovery: RecoveryConfig = field(default_factory=RecoveryConfig)
+    autonomy: AutonomyConfig = field(default_factory=AutonomyConfig)
     providers: Mapping[str, ProviderConfig] = field(default_factory=lambda: MappingProxyType({}))
     models: Mapping[str, ModelConfig] = field(default_factory=lambda: MappingProxyType({}))
     agents: Mapping[str, AgentConfig] = field(default_factory=lambda: MappingProxyType({}))
@@ -150,6 +162,7 @@ _SECTIONS: dict[str, type] = {
     "router": RouterConfig,
     "sandbox": SandboxConfig,
     "recovery": RecoveryConfig,
+    "autonomy": AutonomyConfig,
 }
 
 # Keyed-table sections: [<section>.<id>] -> entry dataclass.
@@ -364,6 +377,15 @@ def validate_config(config: Config) -> None:
     for key, low, high in (("retries", 0, 3), ("advisor_rounds", 0, 2), ("replans", 0, 2), ("max_attempts", 1, 40)):
         if not low <= getattr(rec, key) <= high:
             raise ConfigError(f"recovery.{key} must be between {low} and {high}")
+    auto = config.autonomy
+    if auto.level not in (0, 1, 2, 3):
+        raise ConfigError("autonomy.level must be 0, 1, 2 or 3")
+    if not 0 <= auto.lead_answers <= 20 or not 0 <= auto.lead_revisions <= 3:
+        raise ConfigError("autonomy.lead_answers must be 0-20 and autonomy.lead_revisions 0-3")
+    if auto.merge_method not in ("squash", "merge", "rebase"):
+        raise ConfigError("autonomy.merge_method must be squash, merge, or rebase")
+    if auto.level >= 2 and not (box.enabled and box.test_command.strip()):  # the pull request gate needs a test that ran
+        raise ConfigError("autonomy.level 2 and above need sandbox.enabled and sandbox.test_command")
     if not config.app.name.strip():
         raise ConfigError("app.name must not be empty")
     if config.app.environment not in ENVIRONMENTS:

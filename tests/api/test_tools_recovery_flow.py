@@ -197,7 +197,7 @@ def test_a_finished_delivery_is_not_redone_after_a_crash_before_the_report_was_s
     real, crashes = Runtime._sign, []
 
     def crash_once(self, *args):
-        if not crashes:
+        if not crashes and args[2].startswith('{'):  # the evidence bundle, not a gate's record
             crashes.append(1)
             raise RuntimeError('crash before the report is saved')
         return real(self, *args)
@@ -273,7 +273,7 @@ def test_the_api_exposes_verification_recovery_sandbox_and_the_new_phases(tmp_pa
         project = snapshot(client, task_id)['project_id']
         approval = client.get(f'/v0/approvals?project_id={project}', headers=headers()).json()['items'][0]
         assert approval['verification'] == 'passed' and approval['recovery'] == 'completed'
-        assert client.get('/v0/health', headers=headers()).json()['api_schema'] == 5
+        assert client.get('/v0/health', headers=headers()).json()['api_schema'] == 6
 
 
 def test_a_runtime_without_the_sandbox_says_so(world):

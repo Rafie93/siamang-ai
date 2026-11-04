@@ -200,7 +200,7 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
     @app.get('/v0/health')
     async def health(principal=Depends(permission('read')), db=Depends(database)):
         return {'status': 'healthy' if not db.check() else 'unhealthy', 'version': __version__,
-                'contract_version': '0.6', 'core_schema': 3, 'api_schema': 5, 'observed_at': now()}
+                'contract_version': '0.7', 'core_schema': 3, 'api_schema': 6, 'observed_at': now()}
 
     @app.get('/v0/capabilities')
     async def capabilities(principal=Depends(permission('read'))):
@@ -210,14 +210,15 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
         except RuntimeRefusal:
             configured = False
         return {'transport': 'http', 'updates': 'polling', 'streaming': False, 'proposal_only': True,
-                'patch_application': False, 'publishing': 'pull_request_only', 'model_configured': configured, 'permissions': sorted(principal.permissions),
+                'patch_application': False, 'publishing': 'merge_by_policy' if runtime.autonomy().level == 3 else 'pull_request_only', 'model_configured': configured, 'permissions': sorted(principal.permissions),
                 'agent_models': runtime.assignments(),
                 'execution': runtime.execution_features(),
+                'autonomy': dict(level=runtime.autonomy().level, lead=runtime.autonomy().lead),
                 'documents': [dict(agent=s.agent, stage=s.stage, kind=s.kind, title=s.title, source=str(s.source))
                               for s in CATALOG],
                 'task_statuses': [s.value for s in TaskStatus],
                 'execution_phases': ['queued', 'clarification', 'briefing', 'planning', 'analysis', 'design_approval', 'programming',
-                                     'qa', 'verifying', 'recovering', 'reviewing', 'reporting', 'awaiting_approval', 'blocked', 'interrupted', 'finished', 'failed', 'cancelled']}
+                                     'qa', 'verifying', 'recovering', 'deciding', 'reviewing', 'reporting', 'awaiting_approval', 'blocked', 'interrupted', 'finished', 'failed', 'cancelled']}
 
     # Plain def: asking Ollama for its tags must not hold up the event loop.
     @app.get('/v0/settings/models')
@@ -492,6 +493,13 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
                               db=Depends(database)):
         scoped_task(db, task_id, principal)
         return runtime.decide_design(task_id, principal, body.decision, body.reason)
+
+    @app.get('/v0/tasks/{task_id}/autonomy')
+    async def autonomy(task_id: str, principal=Depends(permission('read')), db=Depends(database)):
+        """What each gate and the Lead decided on this task, and why. Sealed and append-only."""
+        scoped_task(db, task_id, principal)
+        return {'level': runtime.autonomy().level, 'lead': runtime.autonomy().lead,
+                'items': public(runtime.decisions(RunStore(db), task_id)), 'observed_at': now()}
 
     @app.get('/v0/tasks/{task_id}/events')
     async def events(task_id: str, after_seq: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=100),

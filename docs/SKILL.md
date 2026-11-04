@@ -22,7 +22,7 @@ These limits shape every answer, so check them before promising anything:
 - One task runs at a time. A second run returns 409 `worker_busy`. Parallelism exists only
   inside one task: between the parts of a design stage, and between the work packages of
   one wave (`parallel` in `[agents.programmer]`).
-- Pushes reach only `siamang/*` branches, without force or merge. Merging is the owner's.
+- Pushes reach only `siamang/*` branches, without force. Merging is the owner's, unless the operator set `[autonomy] level = 3`.
 - A failed build returns to the Programmer up to `ci_repair` times, as new `source=system` tasks on the same pull
   request. Those tasks are expected, so do not cancel or re-run them unless the owner asks.
 - Static `pass` does not mean the code works. Report it as "passed static checks".
@@ -62,6 +62,9 @@ does not pay for them again. Read `last_error.details` (`cause`, `stage`, `attem
 Before approving a design, read the `work_packages` document. `failed` means the division did not
 happen, and approving hands all the work to one Programmer. `not_applicable` is the Analyst's own
 judgement, with its reason. `POST /v0/tasks/{id}/work-division` asks for the division alone.
+
+With `[autonomy]` on, some gates pass by policy and the Lead answers some questions. `GET /v0/tasks/{id}/autonomy`
+says what was decided and why. A task waiting at a gate at a higher level was held on purpose, so read the Lead's message first.
 
 Never make an approval decision on the owner's behalf unless they explicitly told you
 to for that specific decision. Approval is the point where a person takes responsibility

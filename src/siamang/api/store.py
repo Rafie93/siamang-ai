@@ -1,5 +1,6 @@
-"""API schema v4, additive to core schema v3. All state changes join core transactions."""
+"""API schema v6, additive to core schema v3. All state changes join core transactions."""
 import hashlib
+import hmac
 import json
 from datetime import UTC, datetime
 
@@ -20,9 +21,9 @@ class RunStore:
         with self.db.transaction() as conn:
             conn.execute('CREATE TABLE IF NOT EXISTS api_schema (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL) STRICT')
             conn.execute('INSERT OR IGNORE INTO api_schema VALUES (1,1)')
-            if conn.execute('SELECT version FROM api_schema WHERE singleton=1').fetchone()[0] not in (1, 2, 3, 4):
+            if conn.execute('SELECT version FROM api_schema WHERE singleton=1').fetchone()[0] not in (1, 2, 3, 4, 5, 6):
                 raise ValueError('unsupported API schema version')
-            conn.execute('UPDATE api_schema SET version=4 WHERE singleton=1')
+            conn.execute('UPDATE api_schema SET version=6 WHERE singleton=1')
             conn.execute('''CREATE TABLE IF NOT EXISTS api_runs (
                 run_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, state TEXT NOT NULL,
                 phase TEXT NOT NULL, iteration INTEGER, wait_reason TEXT,
@@ -100,6 +101,15 @@ class RunStore:
             conn.execute('''CREATE TABLE IF NOT EXISTS api_task_ci (
                 task_id TEXT PRIMARY KEY, commit_sha TEXT NOT NULL, state TEXT NOT NULL, runs TEXT NOT NULL, log TEXT,
                 started_at TEXT NOT NULL, updated_at TEXT NOT NULL) STRICT''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS api_autonomy_decisions (
+                position INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, task_id TEXT NOT NULL, gate TEXT NOT NULL,
+                level INTEGER NOT NULL, risk TEXT NOT NULL, outcome TEXT NOT NULL, actor TEXT NOT NULL, reasons TEXT NOT NULL,
+                payload TEXT NOT NULL, evidence TEXT NOT NULL, seal TEXT NOT NULL, decided_at TEXT NOT NULL) STRICT''')
+            conn.execute('CREATE INDEX IF NOT EXISTS api_task_autonomy ON api_autonomy_decisions(task_id,position)')
+            conn.execute('''CREATE TRIGGER IF NOT EXISTS api_autonomy_no_update
+                BEFORE UPDATE ON api_autonomy_decisions BEGIN SELECT RAISE(ABORT, 'append only'); END''')
+            conn.execute('''CREATE TRIGGER IF NOT EXISTS api_autonomy_no_delete
+                BEFORE DELETE ON api_autonomy_decisions BEGIN SELECT RAISE(ABORT, 'append only'); END''')
             conn.execute('CREATE INDEX IF NOT EXISTS api_project_drafts ON api_task_drafts(project_id, state)')
             conn.execute("UPDATE api_task_drafts SET state='failed', error='interrupted' WHERE state='thinking'")
 
@@ -213,6 +223,37 @@ class RunStore:
     def design_approved(self, run_id):
         row = self.db.conn.execute('SELECT decision FROM api_design_decisions WHERE run_id=?', (run_id,)).fetchone()
         return bool(row) and row['decision'] == 'approve'
+
+    @staticmethod
+    def _decision_body(gate, level, risk, outcome, actor, reasons, payload, evidence, decided_at):
+        return json.dumps([gate, level, risk, outcome, actor, reasons, payload, evidence, decided_at], separators=(',', ':'))
+
+    def add_decision(self, run_id, task_id, *, sign, gate, level, risk, outcome, actor, reasons=(), payload=None, evidence=''):
+        """One gate or Lead decision, sealed and append-only: who decided, on what, at which level, and why."""
+        reasons, payload, decided_at = json.dumps(list(reasons), ensure_ascii=False), json.dumps(payload or {}, ensure_ascii=False, sort_keys=True), now()
+        seal = sign(run_id, task_id, self._decision_body(gate, level, risk, outcome, actor, reasons, payload, evidence, decided_at))
+        with self.db.transaction() as conn:
+            conn.execute('INSERT INTO api_autonomy_decisions(run_id,task_id,gate,level,risk,outcome,actor,reasons,payload,evidence,seal,decided_at) '
+                         'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                         (run_id, task_id, gate, level, risk, outcome, actor, reasons, payload, evidence, seal, decided_at))
+
+    def decisions(self, task_id, sign=None):
+        """Oldest first. With ``sign``, each row says whether its seal still holds."""
+        out = []
+        for r in self.db.conn.execute('SELECT * FROM api_autonomy_decisions WHERE task_id=? ORDER BY position', (task_id,)).fetchall():
+            row = {k: r[k] for k in ('position', 'run_id', 'task_id', 'gate', 'level', 'risk', 'outcome', 'actor', 'evidence', 'decided_at')}
+            row |= {'reasons': json.loads(r['reasons']), 'payload': json.loads(r['payload'])}
+            if sign:
+                body = self._decision_body(r['gate'], r['level'], r['risk'], r['outcome'], r['actor'], r['reasons'], r['payload'],
+                                           r['evidence'], r['decided_at'])
+                row['seal_valid'] = hmac.compare_digest(sign(r['run_id'], r['task_id'], body), r['seal'])
+            out.append(row)
+        return out
+
+    def branch_tasks(self, project_id, branch):
+        """Every task that published to one branch: a revision and a CI repair share their base's branch."""
+        return [r['task_id'] for r in self.db.conn.execute(
+            'SELECT task_id FROM api_task_branches WHERE project_id=? AND branch=? AND commit_sha IS NOT NULL', (project_id, branch)).fetchall()]
 
     def create_feature(self, project_id, title, description):
         feature = dict(feature_id=new_id('feature'), project_id=project_id, title=title,
