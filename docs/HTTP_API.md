@@ -20,7 +20,7 @@ missing credentials or a seal key fail closed, rather than starting anonymously.
 
 `SIAMANG_CONFIG` selects the usual TOML config. `SIAMANG_STORAGE_PATH` overrides
 the database path. The API adds versioned supplemental tables to the core SQLite
-database: `api_schema` (v3), `api_runs`, append-only `api_run_events`, `api_features`, `api_task_features`, `api_documents`, and `api_design_decisions`. Core
+database: `api_schema` (v4), `api_runs`, append-only `api_run_events`, `api_features`, `api_task_features`, `api_documents`, and `api_design_decisions`. Core
 schema remains v3 and lifecycle contract remains v0.2. Back up the database
 before first use on an existing installation. No user database was migrated as
 part of development or validation.
@@ -169,11 +169,6 @@ that one Programmer is enough, with its reason. `POST /v0/tasks/{task_id}/work-d
 waits at the gate) asks for the division alone and keeps every other design document. A retry of the same brief keeps a
 generated division and starts its packages again as `pending`.
 
-`task.design_parts` records each model call of the latest run's design as it happened: `stage` (`division` for the work
-division), `part`, `attempt`, `kinds`, `state` (`running`, `done`, `failed`, `interrupted`), `reason`, `model_id`, `timeout_secs`,
-`started_at`, `finished_at`. Overlapping times are the evidence that parts ran side by side. A part's documents are saved
-as soon as it ends.
-
 The division can name a new application's expected findings as notes through the Reviewer's `advisory_codes`, limited to a code-owned
 allowlist that excludes security, QA, and patch findings, and recorded with the review so approval re-derives them.
 
@@ -262,7 +257,7 @@ liveness, not model token progress or completed work.
 | planning | Planner invocation entered |
 | analysis | Analyst invocation entered |
 | programming | Programmer invocation entered, with iteration number |
-| briefing, planning, analysis | A design stage is written as several model calls side by side (3 documents per call, 3 calls at once). It is tried up to 3 rounds (timeout 300s, 450s, 600s), and a later round repeats only the documents that failed, reported as `remaining`. A retry (`POST /retry`, then run) resumes from what an earlier run of the task already finished: design documents written for the same instruction, specification and owner answers are reused, not rewritten, and the event of a stage that kept them carries `reused` (the number of documents). A changed instruction, specification or answer writes everything again. Each round is its own event with `attempt` (1-3); a retry also carries `retry_reason`, the failure that caused it (for example `timeout`). Without a retry, events have no `attempt`. |
+| briefing, planning, analysis | A design stage entered; see [Design stages](#design-stages) |
 | recovering | The Lead steps in after a failed verification; `attempt` is the recovery round |
 | qa | Static QA invocation entered |
 | reviewing | Reviewer invocation entered |
@@ -272,6 +267,30 @@ liveness, not model token progress or completed work.
 | finished | Proposal approved; task result explicitly says patch_applied=false |
 | failed | Pipeline error was recorded, with safe failure details |
 | cancelled | Explicit operator cancellation or authorized proposal rejection |
+
+### Design stages
+
+A design stage is written as several model calls side by side: at most 3 documents per call and 3 calls at once. Each part's
+documents are saved as soon as it ends. A stage gets up to 3 rounds (300, 450, then 600 seconds), and a later round repeats only
+the documents that failed. A call gets the smallest of that limit, the provider's `timeout_secs` (120 when unset), and 600 seconds,
+so a provider below 600 gives later rounds no extra time.
+
+Each round is its own execution event:
+
+| Field | Meaning |
+|---|---|
+| `attempt` | The round, 1 to 3; the failed event carries the last one |
+| `retry_reason` | The failure that caused this round, for example `timeout` |
+| `remaining` | Documents this round repeats |
+| `reused` | Documents kept from an earlier run of the task |
+
+A retry (`POST /retry`, then run) resumes from what an earlier run finished. Documents written for the same instruction,
+specification, owner answers, and project identity are reused, and a generated work division is kept with its packages back at
+`pending`. Any change to those writes everything again. Runs from before this record existed cannot be reused.
+
+`task.design_parts` records each model call of the latest run's design as it happened: `stage` (`division` for the work division),
+`part`, `attempt`, `kinds`, `state` (`running`, `done`, `failed`, `interrupted`), `reason`, `model_id`, `timeout_secs`, `started_at`,
+and `finished_at`. Overlapping times are the evidence that parts ran side by side.
 
 `wait_reason` differentiates `approval_required`, `quality_gate`, `input_required`,
 and `worker_interrupted`. Generic waiting tasks without a runtime record remain
@@ -298,13 +317,14 @@ started model call may finish before the worker stops; its proposal is discarded
 | GET | `/v0/projects/{project_id}` | read; scoped project |
 | GET | `/v0/tasks?project_id=...&status=...&limit=100&offset=0` | read; lifecycle + execution snapshots |
 | POST | `/v0/tasks` | submit; persist a task, no automatic execution |
-| GET | `/v0/tasks/{task_id}` | read; task and latest execution record |
+| GET | `/v0/tasks/{task_id}` | read; task, latest execution record, `packages`, and `design_parts` |
 | GET | `/v0/tasks/{task_id}/events?after_seq=0&limit=100` | read; lifecycle envelope replay |
-| GET | `/v0/tasks/{task_id}/execution-events?after=0&limit=100` | read; persisted real stage transitions |
+| GET | `/v0/tasks/{task_id}/execution-events?after=0&limit=100` | read; persisted real stage transitions, oldest first; page with `after` to reach the newest |
 | POST | `/v0/tasks/{task_id}/run` | run; schedule queued task, 202 after storage succeeds |
 | POST | `/v0/tasks/{task_id}/cancel` | cancel; explicit cooperative cancellation |
 | POST | `/v0/tasks/{task_id}/retry` | retry; counted requeue only, no execution |
-| GET | `/v0/tasks/{task_id}/reports` | read; plan, analysis, loop, patch, static QA, review, plus (API schema 5, each `null` when the run did not record it) `verification`, `recovery`, `programmer_sandbox` |
+| POST | `/v0/tasks/{task_id}/work-division` | run; 202, asks for the work division again and keeps every other design document; 409 `design_not_pending` unless a design waits at the gate |
+| GET | `/v0/tasks/{task_id}/reports` | read; plan, analysis, loop, patch, static QA, review, plus (each `null` when the run did not record it) `verification`, `recovery`, `programmer_sandbox` |
 | GET | `/v0/approvals?project_id=...` | read; waiting proposals with complete evidence and eligibility |
 | POST | `/v0/approvals/{run_id}` | approve; explicit approve/reject through ApprovalService |
 

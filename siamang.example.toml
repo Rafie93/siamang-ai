@@ -32,7 +32,7 @@ name = "Local echo (wiring test)"
 # Claude through your own logged-in `claude` CLI (subscription, personal use only):
 # [providers.claude]
 # type = "claude_cli"
-# timeout_secs = 300
+# timeout_secs = 600     # caps every call; unset means 120, and 600 is the most a call can get
 #
 # [models.claude-sonnet]
 # provider = "claude"
@@ -43,7 +43,7 @@ name = "Local echo (wiring test)"
 # The model an agent uses (HTTP runs): lead, planner, analyst, programmer, qa, reviewer.
 # [agents.programmer]
 # model = "claude-sonnet"
-# parallel = 3            # work packages at the same time (1-6); more uses subscription limits faster
+# parallel = 3            # work packages at the same time within one wave (1-6); more uses subscription limits faster
 # ci_repair = 2           # times a failed build returns to the Programmer (0-3); 0 turns it off
 
 # Phase 25-26: run the project's tests and build in a container before a result may pass. Off by default.

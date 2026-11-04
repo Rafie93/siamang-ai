@@ -16,7 +16,7 @@ Mulai dari sini sesuai kebutuhan Anda.
 
 | Dokumen | Isi |
 |---|---|
-| [HTTP_API.md](HTTP_API.md) | Autentikasi, route, alur task, proyek GitHub, dokumen agen, CI |
+| [HTTP_API.md](HTTP_API.md) | Autentikasi, route, alur task, proyek GitHub, dokumen agen, paket kerja, percobaan ulang, CI |
 | [CONTRACT.md](CONTRACT.md) | Envelope pesan, event lifecycle, versioning |
 
 ## Inti
@@ -42,6 +42,7 @@ Mulai dari sini sesuai kebutuhan Anda.
 | [REVIEWER.md](REVIEWER.md) | Penilaian independen |
 | [LOOP.md](LOOP.md) | Loop Programmer, QA, dan Reviewer |
 | [APPROVAL.md](APPROVAL.md) | Keputusan manusia dan rantai bukti |
+| [SANDBOX.md](SANDBOX.md) | Test, build, dan tool Programmer di container |
 
 ## Aturan menjaga dokumen
 

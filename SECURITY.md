@@ -13,8 +13,9 @@ Know these limits before running it:
   force or merge. When CI fails on an open pull request, it pushes a repair to that branch
   without asking, up to `ci_repair` times. Set `ci_repair = 0` to turn this off.
 - CI logs are project output and reach the model as data. Treat them as untrusted.
-- Review generated pull requests before merging. QA is static, and Siamang does not run
-  project code, so a passing check does not prove the code works.
+- Review generated pull requests before merging. By default QA is static and Siamang does not
+  run project code, so a passing check does not prove the code works. `[sandbox]` runs code in a
+  container when you turn it on, and has not yet been tested with a real container.
 - Treat repository content and model output as untrusted. Report any path where they can
   act as instructions or reach your credentials.
 

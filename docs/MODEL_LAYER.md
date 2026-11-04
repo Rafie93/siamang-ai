@@ -82,7 +82,9 @@ record both.
 Adapters implement `_generate`, and optionally `_health` and
 `_normalize_error` (vendor exception → `ModelError`). `timeout_secs` (on the
 request, else the provider default) is passed through. Enforcing it is the
-adapter's job, because the base class does not spawn threads.
+adapter's job, because the base class does not spawn threads. The `claude_cli` and
+`ollama` adapters use the smallest of the request's value, the provider's value, and
+600 seconds, with 120 seconds standing in for a value that is not set.
 
 **Phase 06 adapter:** `echo` (`providers/echo.py`). It is local and
 deterministic, and it is not an LLM. It returns the last user message

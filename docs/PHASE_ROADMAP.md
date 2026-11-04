@@ -48,7 +48,7 @@ Urutan ini disengaja: otonomi baru aman setelah ada bukti eksekusi dan batas izi
 | 29 Kebijakan otonomi | Level 0–3 di [VISION.md](VISION.md), gerbang berdasarkan risiko, keputusan otomatis tercatat seperti keputusan manusia | Perubahan berisiko rendah sampai ke PR tanpa berhenti |
 | 30 Lead otonom | Lead memilih langkah berikutnya, menjawab pertanyaan yang ada di spesifikasi, dan meneruskan sisanya ke pemilik | Pemilik hanya ditanya hal yang benar-benar butuh keputusannya |
 | 31 Context dan Artifact | Indeks kode, memori antar-run (konvensi dan kegagalan yang ditemukan diteruskan ke tugas berikutnya), penyimpanan hasil build, anggaran desain yang lebih longgar dari 7 KB | Proyek besar tidak kehilangan konteks |
-| 32 Task bersamaan | Clone per task, antrean, peninjauan ulang file lock dan SQLite. Pembagian paket berbasis graf dependensi | Beberapa task berjalan tanpa `worker_busy` |
+| 32 Task bersamaan | Clone per task, antrean, peninjauan ulang file lock dan SQLite. Pembagian paket berbasis graf dependensi, menggantikan gelombang | Beberapa task berjalan tanpa `worker_busy` |
 | 33 Rilis | Lisensi, pengganti template frontend berbayar bila perlu, CI, Docker, `SECURITY.md`, provider API key, GitHub App, TLS, login | Orang lain bisa memasang dengan aman |
 
 ## Phase 01–04: Pemisahan repository dan kontrak
@@ -640,3 +640,39 @@ deskripsi PR.
 Batas yang jujur: belum diuji dengan container nyata (hanya mesin tiruan); run paket paralel memakai jalur lama untuk
 recovery tetapi Programmer-nya sudah bisa memakai tool; replan memakai Planner berbasis templat, jadi langkahnya bisa sama
 dan hanya instruksinya yang berubah; checkpoint hanya untuk tahap delivery.
+
+## Pemecahan pekerjaan besar
+
+Bagian dari Phase 28. Pemicunya task nyata: upgrade framework pada repo berisi 3138 file gagal berulang di tahap Arsitek,
+karena satu panggilan model diminta menulis 8 dokumen sekaligus dan selalu timeout.
+
+**Tahap desain:** dokumen ditulis maksimal 3 per panggilan, 3 panggilan bersamaan. Setiap panggilan tercatat di
+`api_design_parts` dengan waktu nyatanya, dan dokumennya disimpan begitu panggilan itu selesai. Hanya bagian yang gagal
+diulang, sampai 3 putaran (300, 450, 600 detik). Konteks dibatasi: 400 nama file dengan setiap folder terwakili, dan 4.000
+karakter per dokumen sebelumnya.
+
+**Melanjutkan:** retry memakai ulang dokumen yang sudah `generated` dan pembagian kerjanya, selama instruksi, spesifikasi,
+percakapan, dan identitas proyek sama (`api_document_basis`). Run yang dibuat sebelum tabel ini ada tidak bisa dipakai ulang.
+
+**Paket kerja:** gelombang menggantikan "foundation lalu semua paralel". Batas paket mengikuti ukuran repo (4 sampai 10), dengan
+maksimal 4 gelombang. Paket satu gelombang tidak boleh berbagi path; gelombang berikutnya boleh, dan melihat hasil
+sebelumnya. Setiap paket menerima kontrak bersama, daftar paket lain, dan ringkasan gelombang sebelumnya. Paket yang timeout
+dicoba sekali lagi, lalu dibelah dua.
+
+**Kejujuran pembagian:** jawaban yang ditolak kode atau kegagalan model ditanyakan sekali lagi dengan alasannya. Bila tetap
+gagal, dokumen berstatus `failed`. `not_applicable` hanya untuk penilaian Analyst sendiri, beserta alasannya.
+`POST /v0/tasks/{id}/work-division` mengulang pembagian saja di gerbang desain.
+
+Batas yang jujur:
+
+- Tahap desain sudah berjalan dengan model nyata, tetapi gelombang, pembelahan paket, dan bagi ulang baru diuji dengan model
+  tiruan.
+- Dokumen dalam satu tahap ditulis tanpa saling membaca, jadi konsistensinya bergantung pada dokumen tahap sebelumnya.
+- Percobaan ulang tahap desain hanya menambah waktu. Prinsip "kegagalan mengubah strategi" di [VISION.md](VISION.md) belum
+  terpenuhi di sini.
+- Paket satu gelombang hanya terhubung lewat kontrak. Kontrak yang kurang spesifik baru terlihat di putaran integrasi, saat
+  semua paket sudah selesai.
+- Belahan paket memiliki file yang sudah ada. File baru yang langsung berada di folder induknya akan ditolak.
+- Retry memulai ulang semua paket dari `pending`, termasuk yang sudah lulus di run sebelumnya, dan desain perlu disetujui lagi.
+- `execution-events` mengembalikan event terlama lebih dulu. Klien harus memakai `after` agar task yang sering diulang tetap
+  terbaca sampai event terbaru. Virtual Office belum melakukannya.

@@ -16,9 +16,12 @@ same standard: say where a result came from, and never state more than the evide
 
 These limits shape every answer, so check them before promising anything:
 
-- Project code is never run. QA is static, and test results only come from GitHub CI.
-- One task runs at a time. A second run returns 409 `worker_busy`. Parallelism exists
-  only between work packages inside one task (`parallel` in `[agents.programmer]`).
+- By default project code is never run: QA is static, and test results only come from GitHub CI.
+  `[sandbox]` and `[recovery]` are opt-in and not yet tested with a real container. Check
+  `execution` in `GET /v0/capabilities` before saying what a run did.
+- One task runs at a time. A second run returns 409 `worker_busy`. Parallelism exists only
+  inside one task: between the parts of a design stage, and between the work packages of
+  one wave (`parallel` in `[agents.programmer]`).
 - Pushes reach only `siamang/*` branches, without force or merge. Merging is the owner's.
 - A failed build returns to the Programmer up to `ci_repair` times, as new `source=system` tasks on the same pull
   request. Those tasks are expected, so do not cancel or re-run them unless the owner asks.
@@ -32,7 +35,7 @@ The API listens on `127.0.0.1`, uses bearer tokens, and has no push events, so p
 POST /v0/tasks                         submit; does not start work
 POST /v0/tasks/{id}/run                schedule; 202 only means accepted
 GET  /v0/tasks/{id}                    lifecycle status and execution phase
-GET  /v0/tasks/{id}/execution-events   real stage transitions
+GET  /v0/tasks/{id}/execution-events   real stage transitions, oldest first; page with `after`
 GET  /v0/tasks/{id}/documents          what each agent recorded
 ```
 
@@ -52,6 +55,14 @@ A `waiting` task is not stuck. Read `wait_reason` and respond to that reason:
 | `input_required` | Programmer stopped without a question | Send direction via messages |
 | `worker_interrupted` | Server stopped mid-run | Resume from the last safe stage |
 
+A `failed` task resumes where it failed: `POST /v0/tasks/{id}/retry`, then `run`. Finished design
+documents are reused while the instruction, specification, and answers are unchanged, so a retry
+does not pay for them again. Read `last_error.details` (`cause`, `stage`, `attempts`) first.
+
+Before approving a design, read the `work_packages` document. `failed` means the division did not
+happen, and approving hands all the work to one Programmer. `not_applicable` is the Analyst's own
+judgement, with its reason. `POST /v0/tasks/{id}/work-division` asks for the division alone.
+
 Never make an approval decision on the owner's behalf unless they explicitly told you
 to for that specific decision. Approval is the point where a person takes responsibility
 for the change, and its record names who decided.
@@ -67,6 +78,9 @@ Each document has a `source`, which tells you how far to trust it:
 A `not_applicable`, `not_run`, `not_assigned`, or `failed` status comes with a reason.
 Report it as is, and never fill in a missing result.
 
+To say what ran at the same time, read `design_parts` in the task snapshot and compare
+`started_at` and `finished_at`. Do not infer it from the configuration.
+
 ## Configuring models
 
 Set each agent's model in `siamang.toml` and restart the server, or use `POST /v0/settings/models` with the `configure` permission.
@@ -75,6 +89,8 @@ Set each agent's model in `siamang.toml` and restart the server, or use `POST /v
 - Providers: `claude_cli`, `ollama`, `echo`. The HTTP API refuses `echo`.
 - If `planner` or `analyst` has a model, runs stop at `design_approval`.
 - Higher `parallel` values use subscription limits faster.
+- A model call gets the smallest of its stage's limit, the provider's `timeout_secs`
+  (120 when unset), and 600 seconds. Below 600, design retries get no extra time.
 
 Put credentials in environment variables through `api_key_env`, never in the file.
 

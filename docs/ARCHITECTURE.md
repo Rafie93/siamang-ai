@@ -46,11 +46,13 @@ flowchart TD
 
 1. **Masuk:** task dibuat lewat API atau CLI. Pengiriman tidak langsung menjalankan.
 2. **Brief:** Lead bertanya bila perlu, lalu menulis brief.
-3. **Desain:** Planner dan Analyst menulis dokumen. Jika salah satunya punya model,
-   run berhenti di `design_approval`.
-4. **Kode:** Analyst boleh membagi pekerjaan menjadi paket. Tiap paket melewati
-   Loop (Programmer, QA, Reviewer) secara paralel di salinan repo sendiri, lalu
-   digabung dan diperiksa sekali lagi.
+3. **Desain:** Planner dan Analyst menulis dokumen, per bagian dan paralel. Hanya bagian
+   yang gagal diulang, dan retry memakai ulang yang sudah jadi. Jika salah satunya punya
+   model, run berhenti di `design_approval`.
+4. **Kode:** Analyst boleh membagi pekerjaan menjadi paket per gelombang. Tiap paket
+   melewati Loop (Programmer, QA, Reviewer) di salinan repo sendiri, paralel dalam satu
+   gelombang. Gelombang berikutnya melihat hasil sebelumnya. Semua paket lalu digabung
+   dan diperiksa sekali lagi.
 5. **Persetujuan akhir:** keputusan terikat pada rantai bukti di [APPROVAL.md](APPROVAL.md).
 6. **Publikasi:** satu branch `siamang/*` dan satu PR. Hasil CI GitHub dicatat
    sebagai dokumen `measured`.
@@ -170,3 +172,8 @@ ID mengikuti penomoran asli per phase.
 | H2 | Heartbeat berarti hidup, bukan kemajuan | Status tetap jujur |
 | H3 | Satu runtime per DB; restart menandai run terputus, tidak diulang otomatis | Tidak ada eksekusi ganda |
 | H7 | Bukti tersimpan memakai codec bertipe tetap dan HMAC, bukan pickle | Data tersimpan tidak bisa menjalankan kode |
+| WP1 | Paket satu gelombang tidak berbagi path; diperiksa kode, bukan model | Paket paralel tidak bisa saling menimpa |
+| WP2 | Gelombang yang tidak lulus menghentikan gelombang berikutnya | Tidak ada pekerjaan di atas hasil yang gagal |
+| WP3 | Pembagian yang gagal tercatat `failed`, bukan "cukup satu Programmer" | Kegagalan tidak tampil sebagai penilaian |
+| D1 | Waktu tiap panggilan desain dicatat saat terjadi | "Paralel" dihitung dari catatan, bukan diasumsikan |
+| D2 | Dokumen dipakai ulang hanya pada dasar yang sama | Desain lama tidak dipakai untuk instruksi yang berubah |
