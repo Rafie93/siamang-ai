@@ -241,3 +241,42 @@ def test_the_operators_configuration_turns_both_on_and_off(tmp_path):
         path = tmp_path / 'bad.toml'
         path.write_text('[sandbox]\ntools = true\n')  # tools without the sandbox
         load_config(path, env={})
+
+
+# --- what the Virtual Office can read ------------------------------------------------------------------
+
+
+def test_the_api_exposes_verification_recovery_sandbox_and_the_new_phases(tmp_path):
+    world = World(tmp_path)
+    script = Scripted()
+    calls = iter([
+        *({'tool': 'write_file', 'path': c['path'], 'content': c['content']} for c in clean_changes()),
+        {'tool': 'run', 'argv': ['pytest']}, {'tool': 'finish', 'summary': 'ok'},
+        *({'tool': 'write_file', 'path': c['path'], 'content': c['content'] + '# v2\n'} for c in clean_changes()),
+        {'tool': 'run', 'argv': ['pytest']}, {'tool': 'finish', 'summary': 'ok lagi'}])
+    world.programmer = make_model(lambda m, r: json.dumps(next(calls)))
+    tools = SandboxToolRunner(ToolExecutor(SandboxService(Engine(0), SandboxPolicy('img')), ToolPolicy()))
+    with run_with(world, engine=Engine(1, 0), recovery=RecoveryPolicy(retries=1, advisor_rounds=0, replans=0),
+                  tools=tools) as (client, task_id, state):
+        assert state['execution']['phase'] == 'awaiting_approval'
+        item = client.get(f'/v0/tasks/{task_id}/reports', headers=headers()).json()['items'][0]
+        assert item['verification']['passed'] and item['verification']['checks'][0]['name'] == 'test'
+        assert item['recovery']['tiers_used'] == [1] and len(item['recovery']['attempts']) == 2
+        assert item['programmer_sandbox']['verified'] is True and item['programmer_sandbox']['runs'] == 1
+        assert 'argv' not in json.dumps(item['programmer_sandbox'])  # no commands in a result
+        phases = [e['phase'] for e in client.get(f'/v0/tasks/{task_id}/execution-events', headers=headers()).json()['items']]
+        assert 'verifying' in phases and 'recovering' in phases
+        assert phases.index('recovering') < len(phases) - 1
+        caps = client.get('/v0/capabilities', headers=headers()).json()
+        assert {'verifying', 'recovering'} <= set(caps['execution_phases'])
+        assert caps['execution'] == {'sandbox': True, 'tools': True, 'recovery': True}
+        project = snapshot(client, task_id)['project_id']
+        approval = client.get(f'/v0/approvals?project_id={project}', headers=headers()).json()['items'][0]
+        assert approval['verification'] == 'passed' and approval['recovery'] == 'completed'
+        assert client.get('/v0/health', headers=headers()).json()['api_schema'] == 5
+
+
+def test_a_runtime_without_the_sandbox_says_so(world):
+    with TestClient(world.app()) as client:
+        caps = client.get('/v0/capabilities', headers=headers()).json()
+        assert caps['execution'] == {'sandbox': False, 'tools': False, 'recovery': False}

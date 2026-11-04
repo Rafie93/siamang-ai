@@ -149,13 +149,31 @@ start. `POST /v0/tasks` stays available for an instruction that needs no convers
 ### Several Programmers on one task
 
 After the design documents, the Analyst's model may divide the work in `work_packages` (a document bound to the design
-approval): one foundation that runs first and alone, then packages that run at the same time, up to `parallel` in
-`[agents.programmer]` (default 3, at most 6). A package owns its paths exclusively, and a stack still undecided becomes a
+approval): an optional foundation (a new project only) that runs first and alone, then packages in **waves**. The
+packages of one wave run at the same time, up to `parallel` in `[agents.programmer]` (default 3, at most 6); a wave starts only
+when every package of the earlier ones has passed, and its copy of the repository holds their finished code. A wave that
+does not pass stops the next one. The number of packages grows with the size of the repository (4 up to 10, at most four
+waves). Packages of one wave never own the same path; a later wave may own a path of an earlier one. The division carries a
+`contract` (shared names, schema, routes, configuration) that every package receives, together with who else works on
+the task and what the earlier waves finished. A package that times out is tried once more, then cut in two along its
+owned paths, and the halves take its place in the same wave (`attempt` and `wave` are in `task.packages`; a package that cannot be
+cut stops for the owner with `programmer_model_timeout`). A package owns its paths exclusively, and a stack still undecided becomes a
 question to the owner before the design can be approved. Each package works on its own copy of the repository without
 `.git`, through the normal Programmer, QA, and Reviewer loop; a change outside its paths is told once and then stopped. A package that
 stops keeps the others' work, and the owner's answer runs only what has not passed. The patches then merge, and the same QA
 and Reviewer check the whole once, with one automatic repair package if they hold it. That merged result is the
 evidence the unchanged approval seals, published as one pull request with one commit per package. `task.packages` reports each package.
+If the division is refused by the code or the model fails, it is asked once more and told why. A division that still fails
+leaves `work_packages` with status `failed` and the real reason; `not_applicable` is only ever the Analyst's own judgement
+that one Programmer is enough, with its reason. `POST /v0/tasks/{task_id}/work-division` (`run`, refused unless a design
+waits at the gate) asks for the division alone and keeps every other design document. A retry of the same brief keeps a
+generated division and starts its packages again as `pending`.
+
+`task.design_parts` records each model call of the latest run's design as it happened: `stage` (`division` for the work
+division), `part`, `attempt`, `kinds`, `state` (`running`, `done`, `failed`, `interrupted`), `reason`, `model_id`, `timeout_secs`,
+`started_at`, `finished_at`. Overlapping times are the evidence that parts ran side by side. A part's documents are saved
+as soon as it ends.
+
 The division can name a new application's expected findings as notes through the Reviewer's `advisory_codes`, limited to a code-owned
 allowlist that excludes security, QA, and patch findings, and recorded with the review so approval re-derives them.
 
@@ -228,6 +246,8 @@ Lifecycle remains `queued`, `running`, `waiting`, `completed`, `failed`,
 `cancelled`. Task Engine still manages state only. The API runtime owns the
 proposal workflow, calling the existing Planner, Analyst, and bounded Loop.
 
+A task that fails in a design stage has `last_error.details` with `cause`, `stage` and `attempts`.
+
 Task snapshots add `execution` with `run_id`, `state`, `phase`, `iteration`,
 `wait_reason`, `heartbeat_at`, `updated_at`, `created_at`, `activity_known`, and
 `stale` when a runtime record exists. Without a runtime record, `phase=null`,
@@ -242,6 +262,8 @@ liveness, not model token progress or completed work.
 | planning | Planner invocation entered |
 | analysis | Analyst invocation entered |
 | programming | Programmer invocation entered, with iteration number |
+| briefing, planning, analysis | A design stage is written as several model calls side by side (3 documents per call, 3 calls at once). It is tried up to 3 rounds (timeout 300s, 450s, 600s), and a later round repeats only the documents that failed, reported as `remaining`. A retry (`POST /retry`, then run) resumes from what an earlier run of the task already finished: design documents written for the same instruction, specification and owner answers are reused, not rewritten, and the event of a stage that kept them carries `reused` (the number of documents). A changed instruction, specification or answer writes everything again. Each round is its own event with `attempt` (1-3); a retry also carries `retry_reason`, the failure that caused it (for example `timeout`). Without a retry, events have no `attempt`. |
+| recovering | The Lead steps in after a failed verification; `attempt` is the recovery round |
 | qa | Static QA invocation entered |
 | reviewing | Reviewer invocation entered |
 | awaiting_approval | Final loop passed; explicit human decision still required |
@@ -268,7 +290,7 @@ started model call may finish before the worker stops; its proposal is discarded
 | Method | Route | Permission / behavior |
 |---|---|---|
 | GET | `/v0/health` | read; storage health/version and observation timestamp |
-| GET | `/v0/capabilities` | read; truthful model configuration, permissions, supported statuses |
+| GET | `/v0/capabilities` | read; truthful model configuration, permissions, supported statuses; `execution` = `{sandbox, tools, recovery}`; phases include `verifying` and `recovering` |
 | GET | `/v0/settings/models` | read; each agent's model and what can be chosen: configured models plus the tags Ollama has installed, with `cloud` true when the model is not on this machine |
 | POST | `/v0/settings/models` | configure and an unrestricted `*` scope; body `agent`, `provider`, `provider_model`. Only an offered, available model is accepted. Edits the `SIAMANG_CONFIG` file in place, adding a `[models.*]` table for a new Ollama tag; the agent's next model call uses it, no restart |
 | GET | `/v0/openapi.json` | read; generated OpenAPI contract, bearer security scheme |
@@ -282,7 +304,7 @@ started model call may finish before the worker stops; its proposal is discarded
 | POST | `/v0/tasks/{task_id}/run` | run; schedule queued task, 202 after storage succeeds |
 | POST | `/v0/tasks/{task_id}/cancel` | cancel; explicit cooperative cancellation |
 | POST | `/v0/tasks/{task_id}/retry` | retry; counted requeue only, no execution |
-| GET | `/v0/tasks/{task_id}/reports` | read; plan, analysis, loop, patch, static QA, review |
+| GET | `/v0/tasks/{task_id}/reports` | read; plan, analysis, loop, patch, static QA, review, plus (API schema 5, each `null` when the run did not record it) `verification`, `recovery`, `programmer_sandbox` |
 | GET | `/v0/approvals?project_id=...` | read; waiting proposals with complete evidence and eligibility |
 | POST | `/v0/approvals/{run_id}` | approve; explicit approve/reject through ApprovalService |
 

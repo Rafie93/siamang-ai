@@ -50,6 +50,13 @@ class RunStore:
                 stage TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, source TEXT NOT NULL,
                 status TEXT NOT NULL, content TEXT NOT NULL, content_sha256 TEXT NOT NULL, reason TEXT NOT NULL,
                 model_id TEXT, created_at TEXT NOT NULL, UNIQUE(run_id, kind)) STRICT''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS api_design_parts (
+                run_id TEXT NOT NULL, stage TEXT NOT NULL, part INTEGER NOT NULL, attempt INTEGER NOT NULL, kinds TEXT NOT NULL,
+                state TEXT NOT NULL, reason TEXT, model_id TEXT, timeout_secs INTEGER, started_at TEXT NOT NULL, finished_at TEXT,
+                PRIMARY KEY (run_id, stage, part, attempt)) STRICT''')
+            conn.execute("UPDATE api_design_parts SET state='interrupted', finished_at=NULL WHERE state='running'")
+            conn.execute('CREATE TABLE IF NOT EXISTS api_document_basis (run_id TEXT NOT NULL, kind TEXT NOT NULL, '
+                         'basis TEXT NOT NULL, PRIMARY KEY (run_id, kind)) STRICT')
             conn.execute('CREATE INDEX IF NOT EXISTS api_task_documents ON api_documents(task_id)')
             conn.execute('''CREATE TABLE IF NOT EXISTS api_project_repos (
                 project_id TEXT PRIMARY KEY, repository TEXT NOT NULL, default_branch TEXT, private INTEGER,
@@ -81,6 +88,14 @@ class RunStore:
                 specialty TEXT NOT NULL, instructions TEXT NOT NULL, owns TEXT NOT NULL, state TEXT NOT NULL, phase TEXT,
                 iteration INTEGER, summary TEXT, questions TEXT, error TEXT, patch TEXT, updated_at TEXT NOT NULL,
                 PRIMARY KEY (run_id, key)) STRICT''')
+            have = {r['name'] for r in conn.execute('PRAGMA table_info(api_work_packages)')}
+            if 'wave' not in have:  # runs made before waves: the foundation went first, everything else together
+                conn.execute('ALTER TABLE api_work_packages ADD COLUMN wave INTEGER NOT NULL DEFAULT 1')
+                conn.execute("UPDATE api_work_packages SET wave=0 WHERE kind='foundation'")
+            if 'attempt' not in have:
+                conn.execute('ALTER TABLE api_work_packages ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1')
+            if 'contract' not in have:
+                conn.execute("ALTER TABLE api_work_packages ADD COLUMN contract TEXT NOT NULL DEFAULT ''")
             conn.execute("UPDATE api_work_packages SET state='pending', phase=NULL WHERE state='running'")
             conn.execute('''CREATE TABLE IF NOT EXISTS api_task_ci (
                 task_id TEXT PRIMARY KEY, commit_sha TEXT NOT NULL, state TEXT NOT NULL, runs TEXT NOT NULL, log TEXT,
@@ -109,14 +124,16 @@ class RunStore:
                                    (task_id,)).fetchone()
         return dict(row) if row else None
 
-    def update(self, run_id, *, state, phase, iteration=None, wait_reason=None):
+    def update(self, run_id, *, state, phase, iteration=None, wait_reason=None, **note):
         with self.db.transaction() as conn:
             row = self.get(run_id)
             conn.execute('UPDATE api_runs SET state=?,phase=?,iteration=?,wait_reason=?,heartbeat_at=?,updated_at=? '
                          'WHERE run_id=?', (state, phase, iteration, wait_reason,
                                            now() if state == 'running' else None, now(), run_id))
+            # ``note`` (attempt, retry_reason) is history for the reader only: it has no column of its own.
             self.event(run_id, row['task_id'], dict(state=state, phase=phase, iteration=iteration,
-                                                   wait_reason=wait_reason))
+                                                   wait_reason=wait_reason,
+                                                   **{k: v for k, v in note.items() if v is not None}))
 
     def events(self, task_id, after=0, limit=100):
         rows = self.db.conn.execute('SELECT * FROM api_run_events WHERE task_id=? AND position>? '
@@ -124,7 +141,7 @@ class RunStore:
         return [dict(position=r['position'], run_id=r['run_id'], task_id=r['task_id'],
                      timestamp=r['timestamp'], **json.loads(r['payload'])) for r in rows]
 
-    def save_documents(self, run_id, task_id, documents):
+    def save_documents(self, run_id, task_id, documents, basis=''):
         with self.db.transaction() as conn:
             for d in documents:
                 # A rerun after the owner's answer replaces what the earlier attempt recorded.
@@ -133,11 +150,56 @@ class RunStore:
                              (new_id('document'), run_id, task_id, d.spec.agent, d.spec.stage, d.spec.kind,
                               d.spec.title, str(d.spec.source), str(d.status), d.content,
                               hashlib.sha256(d.content.encode()).hexdigest(), d.reason, d.model_id, now()))
+                conn.execute('DELETE FROM api_document_basis WHERE run_id=? AND kind=?', (run_id, d.spec.kind))
+                if basis and str(d.status) == 'generated':
+                    conn.execute('INSERT INTO api_document_basis VALUES (?,?,?)', (run_id, d.spec.kind, basis))
 
     def documents(self, task_id, run_id=None):
         run_id = run_id or (self.latest(task_id) or {}).get('run_id')
         rows = self.db.conn.execute('SELECT * FROM api_documents WHERE run_id=? ORDER BY rowid', (run_id,)).fetchall()
         return [dict(r) for r in rows]
+
+    def start_part(self, run_id, stage, part, attempt, kinds, timeout_secs):
+        """One model call of a stage has begun. Its row is the evidence of what ran, when, and for how long."""
+        with self.db.transaction() as conn:
+            conn.execute('INSERT OR REPLACE INTO api_design_parts(run_id,stage,part,attempt,kinds,state,timeout_secs,started_at) '
+                         "VALUES (?,?,?,?,?,'running',?,?)", (run_id, stage, part, attempt, json.dumps(list(kinds)), timeout_secs, now()))
+
+    def finish_part(self, run_id, stage, part, attempt, *, state, reason, model_id, started_at, finished_at):
+        with self.db.transaction() as conn:
+            conn.execute('UPDATE api_design_parts SET state=?,reason=?,model_id=?,started_at=?,finished_at=? '
+                         'WHERE run_id=? AND stage=? AND part=? AND attempt=?',
+                         (state, reason, model_id, started_at, finished_at, run_id, stage, part, attempt))
+
+    def design_parts(self, task_id):
+        """Every model call of the latest run's design, as recorded when it happened."""
+        rows = self.db.conn.execute('SELECT * FROM api_design_parts WHERE run_id=? ORDER BY rowid',
+                                    ((self.latest(task_id) or {}).get('run_id'),)).fetchall()
+        return [{k: r[k] for k in ('stage', 'part', 'attempt', 'state', 'reason', 'model_id', 'timeout_secs', 'started_at',
+                                   'finished_at')} | {'kinds': json.loads(r['kinds'])} for r in rows]
+
+    def copy_packages(self, from_run, to_run):
+        """The same division for a retry: the work starts again, the model is not asked to divide it again."""
+        with self.db.transaction() as conn:
+            conn.execute('DELETE FROM api_work_packages WHERE run_id=?', (to_run,))
+            conn.execute("INSERT INTO api_work_packages(run_id,key,position,kind,title,specialty,instructions,owns,state,wave,contract,updated_at) "
+                         "SELECT ?,key,position,kind,title,specialty,instructions,owns,'pending',wave,contract,? FROM api_work_packages "
+                         "WHERE run_id=? AND kind<>'fix'", (to_run, now(), from_run))
+
+    def reusable_documents(self, task_id, run_id, basis):
+        """Documents an earlier run of this task finished on the same basis: a retry resumes there, not from the brief.
+
+        The newest finished copy of each kind wins. A document written for a different instruction, specification, or
+        owner answer is never offered.
+        """
+        rows = self.db.conn.execute(
+            "SELECT d.* FROM api_documents d JOIN api_document_basis b ON b.run_id=d.run_id AND b.kind=d.kind "
+            "WHERE d.task_id=? AND d.run_id<>? AND b.basis=? AND d.status='generated' "
+            'ORDER BY d.created_at DESC, d.rowid DESC', (task_id, run_id, basis)).fetchall()
+        out = {}
+        for row in rows:
+            out.setdefault(row['kind'], dict(row))
+        return out
 
     def documents_digest(self, run_id):
         rows = self.db.conn.execute('SELECT kind,content_sha256 FROM api_documents WHERE run_id=? ORDER BY kind',
@@ -213,10 +275,18 @@ class RunStore:
                 self.add_package(run_id, package, position)
 
     def add_package(self, run_id, package, position):
-        self.db.conn.execute('INSERT INTO api_work_packages(run_id,key,position,kind,title,specialty,instructions,owns,state,updated_at) '
-                             "VALUES (?,?,?,?,?,?,?,?,'pending',?)",
+        self.db.conn.execute('INSERT INTO api_work_packages(run_id,key,position,kind,title,specialty,instructions,owns,state,'
+                             'wave,contract,updated_at) VALUES (?,?,?,?,?,?,?,?,\'pending\',?,?,?)',
                              (run_id, package.key, position, package.kind, package.title, package.specialty,
-                              package.instructions, json.dumps(list(package.owns)), now()))
+                              package.instructions, json.dumps(list(package.owns)), package.wave, package.contract, now()))
+
+    def split_package(self, run_id, key, children):
+        """A package too big for one sitting is replaced by smaller ones in the same place and wave."""
+        with self.db.transaction() as conn:
+            row = conn.execute('SELECT position FROM api_work_packages WHERE run_id=? AND key=?', (run_id, key)).fetchone()
+            conn.execute('DELETE FROM api_work_packages WHERE run_id=? AND key=?', (run_id, key))
+            for child in children:
+                self.add_package(run_id, child, row['position'])
 
     def work_packages(self, run_id):
         rows = self.db.conn.execute('SELECT * FROM api_work_packages WHERE run_id=? ORDER BY position', (run_id,)).fetchall()
@@ -233,7 +303,7 @@ class RunStore:
         out = []
         for r in self.work_packages((self.latest(task_id) or {}).get('run_id')):
             out.append({k: r[k] for k in ('key', 'kind', 'title', 'specialty', 'state', 'phase', 'iteration', 'summary',
-                                          'error', 'updated_at')} | {'owns': json.loads(r['owns']),
+                                          'error', 'updated_at', 'wave', 'attempt')} | {'owns': json.loads(r['owns']),
                        'questions': json.loads(r['questions'] or '[]'),
                        'files': len(decode(json.loads(r['patch'])).changes) if r['patch'] else 0})
         return out

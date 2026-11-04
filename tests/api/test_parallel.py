@@ -11,9 +11,14 @@ from fastapi.testclient import TestClient
 from siamang.api.app import create_app
 from siamang.api.parallel import commit_groups, merge_patches
 from siamang.config import ConfigError, load_config
-from siamang.documents.packages import owned, parse_plan, plan_work, render
+from siamang.documents.packages import divide, owned, package_limit, parse_plan, plan_work, render, split_owns
+from siamang.models.errors import ModelTimeoutError
 from siamang.programmer.change import BeforeState, Operation, ProposedChange
 from siamang.programmer.patch import Patch
+from siamang.api.store import RunStore
+from siamang.projects import ProjectRegistry
+from siamang.storage import Database
+from siamang.tasks import TaskEngine, TaskFailure
 from tests.api.test_http import headers
 from tests.api.test_repos import World, git, new_project, snapshot, task, until, wait_execution
 from tests.support.programmer import make_model, reply
@@ -221,7 +226,7 @@ def test_two_packages_can_never_own_the_same_file(a, b):
 
 
 def test_division_limits_and_failure_fall_back_to_one_programmer():
-    assert parse_plan(dict(DIVIDED, packages=[PKG(str(i), [f'p{i}/']) for i in range(7)])).packages == ()
+    assert parse_plan(dict(DIVIDED, packages=[PKG(str(i), [f'p{i}/']) for i in range(11)])).packages == ()
     assert parse_plan(dict(DIVIDED, foundation=None, packages=[PKG('A', ['a/'])])).packages == ()
     assert parse_plan('rubbish') is None and plan_work(None, {}) is None
     assert plan_work(make_model('bukan json', structured=True).router, {}) is None
@@ -372,3 +377,260 @@ def test_a_subscription_limit_says_so_and_keeps_finished_work(tmp_path):
         client.post(f'/v0/tasks/{task_id}/messages', headers=headers(), json={'content': 'Lanjutkan.'})
         wait_execution(client, task_id, 'awaiting_approval')
         assert team.seen.count('Fondasi') == 1
+
+
+WAVED = dict(stack={'backend': 'Laravel'}, undecided=[], contract='Kelas User tetap bernama User; semua rute tetap di bawah /api.',
+             foundation=None,
+             packages=[dict(PKG('Deps', ['deps.txt']), wave=1), dict(PKG('Models', ['models/']), wave=2),
+                       dict(PKG('Routes', ['routes/']), wave=2), dict(PKG('Checks', ['checks/']), wave=3)])
+
+
+def test_waves_run_in_order_each_wave_side_by_side_and_each_sees_the_one_before(tmp_path):
+    world = ParallelWorld(tmp_path, WAVED)
+    order, seen, work, lock = [], {}, {}, threading.Lock()
+    side_by_side = threading.Barrier(2)  # Models and Routes only pass together: they are one wave
+
+    def watch(title, wait=False):
+        def hook(request):
+            files = json.loads(request.messages[-1].content.split('\n', 1)[1])['files']
+            with lock:
+                order.append(title)
+                seen[title] = [f['path'] for f in files]
+                work[title] = owning(request)
+            if wait:
+                side_by_side.wait(10)
+        return hook
+
+    world.programmer = make_model(Team(script={'Deps': watch('Deps'), 'Models': watch('Models', True),
+                                               'Routes': watch('Routes', True), 'Checks': watch('Checks')}))
+    with TestClient(world.app()) as client:
+        project_id = new_project(client, world)
+        task_id = to_design(client, world, project_id)
+        approve_design(client, task_id)
+        wait_execution(client, task_id, 'awaiting_approval')
+        packages = snapshot(client, task_id)['packages']
+    assert order[0] == 'Deps' and order[-1] == 'Checks' and set(order[1:3]) == {'Models', 'Routes'}
+    assert [p['wave'] for p in packages] == [1, 2, 2, 3] and {p['state'] for p in packages} == {'passed'}
+    assert 'deps.txt' in seen['Models'] and 'deps.txt' in seen['Routes']  # a later wave builds on the earlier result
+    assert 'models/main.py' in seen['Checks'] and 'routes/main.py' in seen['Checks']
+    assert 'models/main.py' not in seen['Routes']  # a neighbour of the same wave is not seen
+    assert work['Models']['shared_contract'].startswith('Kelas User') and work['Models']['wave'] == 2
+    assert any(line.startswith('Routes') for line in work['Models']['team'])
+    assert any(line.startswith('Deps') for line in work['Checks']['finished_earlier'])
+
+
+def test_a_package_that_times_out_twice_is_cut_in_two_and_the_halves_finish(tmp_path):
+    plan = dict(DIVIDED, foundation=None, packages=[PKG('Backend', ['api/', 'web/']), PKG('Frontend', ['frontend/'])])
+    world = ParallelWorld(tmp_path, plan)
+    tries = []
+
+    def too_big(request):
+        tries.append(1)
+        raise ModelTimeoutError('too slow')
+
+    world.programmer = make_model(Team(script={'Backend': too_big}))
+    with TestClient(world.app()) as client:
+        project_id = new_project(client, world)
+        task_id = to_design(client, world, project_id)
+        approve_design(client, task_id)
+        wait_execution(client, task_id, 'awaiting_approval')
+        packages = snapshot(client, task_id)['packages']
+    assert len(tries) >= 2  # tried again before it was cut
+    assert sorted(p['title'] for p in packages) == ['Backend (a)', 'Backend (b)', 'Frontend']
+    assert {p['state'] for p in packages} == {'passed'}
+    assert sorted(tuple(p['owns']) for p in packages if p['title'].startswith('Backend')) == [('api/',), ('web/',)]
+
+
+def test_a_package_that_cannot_be_cut_and_keeps_timing_out_stops_for_the_owner(tmp_path):
+    plan = dict(DIVIDED, foundation=None, packages=[PKG('Backend', ['one.py']), PKG('Frontend', ['frontend/'])])
+    world = ParallelWorld(tmp_path, plan)
+
+    def too_big(request):
+        raise ModelTimeoutError('too slow')
+
+    world.programmer = make_model(Team(script={'Backend': too_big}))
+    with TestClient(world.app()) as client:
+        project_id = new_project(client, world)
+        task_id = to_design(client, world, project_id)
+        approve_design(client, task_id)
+        stopped = waited(client, task_id)
+    backend = next(p for p in stopped['packages'] if p['title'] == 'Backend')
+    assert (backend['state'], backend['error'], backend['attempt']) == ('failed', 'programmer_model_timeout', 2)
+    assert next(p for p in stopped['packages'] if p['title'] == 'Frontend')['state'] == 'passed'
+
+
+def test_a_wave_waits_for_the_one_before_and_a_failed_wave_stops_the_next(tmp_path):
+    world = ParallelWorld(tmp_path, WAVED)
+    seen = []
+
+    def broken(request):
+        seen.append('Deps')
+        raise ModelTimeoutError('too slow')
+
+    def later(title):
+        def hook(request):
+            seen.append(title)
+        return hook
+
+    world.programmer = make_model(Team(script={'Deps': broken, 'Models': later('Models'), 'Routes': later('Routes'), 'Checks': later('Checks')}))
+    with TestClient(world.app()) as client:
+        project_id = new_project(client, world)
+        task_id = to_design(client, world, project_id)
+        approve_design(client, task_id)
+        stopped = waited(client, task_id)
+    assert set(seen) == {'Deps'}  # nothing was built on work that did not pass
+    assert {p['title']: p['state'] for p in stopped['packages']}['Deps'] == 'failed'
+
+
+def test_waves_may_share_a_file_but_one_wave_may_not():
+    shared = dict(DIVIDED, foundation=None, packages=[dict(PKG('A', ['composer.json']), wave=1), dict(PKG('B', ['composer.json', 'app/']), wave=2)])
+    plan = parse_plan(shared)
+    assert [p.wave for p in plan.packages] == [1, 2]
+    assert parse_plan(dict(shared, packages=[dict(PKG('A', ['composer.json']), wave=1), dict(PKG('B', ['composer.json']), wave=1)])) is None
+    gaps = parse_plan(dict(shared, packages=[dict(PKG('A', ['a/']), wave=7), dict(PKG('B', ['b/']), wave=2)]))
+    assert [(p.title, p.wave) for p in gaps.packages] == [('B', 1), ('A', 2)]  # sorted, renumbered without gaps
+    assert 'wave' not in dict(DIVIDED, foundation=None)['packages'][0]
+    assert parse_plan(DIVIDED).packages[0].wave == 0 and parse_plan(DIVIDED).packages[1].wave == 1
+
+
+def test_the_contract_reaches_every_package_and_is_bounded():
+    plan = parse_plan(dict(WAVED, contract='x' * 10_000))
+    assert {len(p.contract) for p in plan.packages} == {1_800} and len(plan.contract) == 1_800
+    assert 'Kontrak bersama' in render(parse_plan(WAVED))
+
+
+def test_the_package_limit_grows_with_the_codebase_inside_a_ceiling():
+    assert package_limit(0) == 4 and package_limit(150) == 7 and package_limit(10_000) == 10
+    wide = dict(DIVIDED, foundation=None, packages=[PKG(str(i), [f'p{i}/']) for i in range(6)])
+    assert parse_plan(wide, limit=4).packages == () and len(parse_plan(wide, limit=7).packages) == 6
+
+
+def test_a_directory_is_cut_along_its_children_and_a_file_is_not_cut():
+    names = [f'app/Models/m{i}.php' for i in range(6)] + [f'app/Http/h{i}.php' for i in range(5)] + ['app/Kernel.php', 'app/Console/c.php']
+    first, second = split_owns(('app/',), names)
+    assert set(first) | set(second) == {'app/Models/', 'app/Http/', 'app/Kernel.php', 'app/Console/'} and not set(first) & set(second)
+    assert split_owns(('a/', 'b/', 'c/'), []) == (('a/', 'b/'), ('c/',))
+    assert split_owns(('one.php',), names) is None and split_owns(('empty/',), names) is None and split_owns((), names) is None
+
+
+def test_a_database_from_before_waves_gets_them_without_losing_a_package(tmp_path):
+    import sqlite3
+
+    from siamang.api.store import RunStore
+    from siamang.storage import Database
+    path = tmp_path / 'old.db'
+    old = sqlite3.connect(path)
+    old.execute('''CREATE TABLE api_work_packages (
+        run_id TEXT NOT NULL, key TEXT NOT NULL, position INTEGER NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+        specialty TEXT NOT NULL, instructions TEXT NOT NULL, owns TEXT NOT NULL, state TEXT NOT NULL, phase TEXT,
+        iteration INTEGER, summary TEXT, questions TEXT, error TEXT, patch TEXT, updated_at TEXT NOT NULL,
+        PRIMARY KEY (run_id, key)) STRICT''')
+    for position, (key, kind) in enumerate([('foundation', 'foundation'), ('pkg-1', 'package')]):
+        old.execute("INSERT INTO api_work_packages VALUES ('r',?,?,?,?,'','x','[]','passed',NULL,NULL,NULL,NULL,NULL,NULL,'t')", (key, position, kind, key))
+    old.commit()
+    old.close()
+    with Database(path) as db:
+        store = RunStore(db)
+        store.initialize()
+        store.initialize()  # again: migrating twice is harmless
+        assert [(r['kind'], r['wave'], r['attempt'], r['contract']) for r in store.work_packages('r')] == [('foundation', 0, 1, ''), ('package', 1, 1, '')]
+
+
+def division_doc(client, task_id):
+    return {d['kind']: d for d in client.get(f'/v0/tasks/{task_id}/documents', headers=headers()).json()['items']}['work_packages']
+
+
+class Refusing(ParallelWorld):
+    """The first ``bad`` answers to the division are ones the code refuses."""
+
+    def __init__(self, tmp_path, answers):
+        super().__init__(tmp_path)
+        self.answers, self.asked = answers, []
+
+    def _analyst(self, model, request):
+        if request.metadata.get('purpose') == 'work_packages':
+            self.asked.append(json.loads(request.messages[-1].content.split('\n', 1)[1]))
+            answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+            if isinstance(answer, Exception):
+                raise answer
+            return json.dumps(answer)
+        return self._docs(model, request)
+
+
+def test_a_refused_division_is_asked_again_and_told_why(tmp_path):
+    unsafe = dict(DIVIDED, foundation=None, packages=[PKG('A', ['.env.production']), PKG('B', ['b/'])])
+    world = Refusing(tmp_path, [unsafe, DIVIDED])
+    with TestClient(world.app()) as client:
+        task_id = to_design(client, world, new_project(client, world))
+        doc = division_doc(client, task_id)
+        parts = [p for p in snapshot(client, task_id)['design_parts'] if p['stage'] == 'division']
+    assert doc['status'] == 'generated'
+    assert '.env.production' in world.asked[1]['rejected_division'] and 'rejected_division' not in world.asked[0]
+    assert [(p['attempt'], p['state']) for p in parts] == [(1, 'failed'), (2, 'done')] and '.env.production' in parts[0]['reason']
+
+
+def test_a_division_that_keeps_failing_says_so_and_never_claims_one_programmer_is_enough(tmp_path):
+    world = Refusing(tmp_path, [dict(DIVIDED, foundation=None, packages=[PKG('A', ['x/']), PKG('B', ['x/'])])])
+    with TestClient(world.app()) as client:
+        task_id = to_design(client, world, new_project(client, world))
+        doc = division_doc(client, task_id)
+    assert doc['status'] == 'failed' and 'gagal setelah 2 percobaan' in doc['reason'] and 'x/' in doc['reason']
+    assert 'menilai cukup' not in doc['reason']
+
+
+def test_one_programmer_is_reported_as_the_analysts_own_judgement(tmp_path):
+    world = Refusing(tmp_path, [dict(stack={}, undecided=[], contract='', foundation=None, packages=[],
+                                     single_programmer_reason='Hanya 2 file berubah.')])
+    with TestClient(world.app()) as client:
+        task_id = to_design(client, world, new_project(client, world))
+        doc = division_doc(client, task_id)
+    assert doc['status'] == 'not_applicable' and doc['reason'] == 'Analyst menilai cukup satu Programmer: Hanya 2 file berubah.'
+    assert len(world.asked) == 1
+
+
+def test_only_the_division_is_asked_again_at_the_design_gate(tmp_path):
+    world = Refusing(tmp_path, [TimeoutError('x'), TimeoutError('x'), DIVIDED])
+    with TestClient(world.app()) as client:
+        task_id = to_design(client, world, new_project(client, world))
+        assert division_doc(client, task_id)['status'] == 'failed'
+        written = len(world.analyst.requests)
+        design = client.get(f'/v0/tasks/{task_id}/documents', headers=headers()).json()['items']
+        srs = next(d for d in design if d['kind'] == 'srs')
+
+        assert client.post(f'/v0/tasks/{task_id}/work-division', headers=headers()).status_code == 202
+        wait_execution(client, task_id, 'design_approval')
+        until(lambda: snapshot(client, task_id)['packages'], 'packages')
+        doc = division_doc(client, task_id)
+        after = client.get(f'/v0/tasks/{task_id}/documents', headers=headers()).json()['items']
+        parts = [p for p in snapshot(client, task_id)['design_parts'] if p['stage'] == 'division']
+    assert doc['status'] == 'generated' and len(world.analyst.requests) == written + 1  # one call, not the whole design
+    assert next(d for d in after if d['kind'] == 'srs')['content_sha256'] == srs['content_sha256']
+    assert [p['attempt'] for p in parts] == [1, 2, 3]
+
+
+def test_redividing_is_refused_when_no_design_is_waiting(world):
+    with TestClient(world.app()) as client:
+        project_id = new_project(client, world)
+        task_id = task(client, project_id)
+        assert client.post(f'/v0/tasks/{task_id}/work-division', headers=headers()).status_code == 409
+
+
+def test_a_retry_keeps_the_division_without_asking_for_it_again(tmp_path):
+    world = Refusing(tmp_path, [DIVIDED])
+    with TestClient(world.app()) as client:
+        task_id = to_design(client, world, new_project(client, world))
+        assert len(world.asked) == 1
+        with Database(world.settings.database) as db:
+            store, engine = RunStore(db), TaskEngine(db, ProjectRegistry(db))
+            row = store.latest(task_id)
+            with db.transaction():
+                engine.start(task_id)
+                engine.fail(task_id, TaskFailure('X', 'x', retryable=True))
+                store.update(row['run_id'], state='failed', phase='failed')
+        client.post(f'/v0/tasks/{task_id}/retry', headers=headers())
+        client.post(f'/v0/tasks/{task_id}/run', headers=headers())
+        until(lambda: snapshot(client, task_id)['execution']['run_id'] != row['run_id']
+              and snapshot(client, task_id)['execution']['phase'] == 'design_approval', 'the second gate')
+        packages = snapshot(client, task_id)['packages']
+    assert len(world.asked) == 1 and [p['title'] for p in packages] == ['Fondasi', 'Backend', 'Frontend']
+    assert {p['state'] for p in packages} == {'pending'}

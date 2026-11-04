@@ -26,6 +26,13 @@ def failure_input(report) -> dict:
     return {INPUT_KEY: report.feedback()}
 
 
+def failure_text(report) -> str:
+    """Why a delivery attempt failed, for people and for the next attempt: the check, then the end of its output."""
+    failing = next((c for c in report.checks if c.status not in ('passed', 'skipped')), None)
+    tail = ' '.join(failing.output.split())[-300:] if failing and failing.output else ''
+    return ('; '.join(report.blockers()) + (f' — {tail}' if tail else ''))[:700]
+
+
 def blocked_message(report) -> str:
     if report.status == 'failed':
         return 'Test atau build gagal saat dijalankan di sandbox. Hasil ini tidak dikirim sebagai lulus.'

@@ -14,10 +14,19 @@ from dataclasses import replace
 from siamang.analyst import AnalysisRequest, SystemAnalyst
 from siamang.approval import ApprovalDecision, ApprovalPolicy, ApprovalRequest, ApprovalService
 from siamang.ids import new_id
-from siamang.documents.author import Document, choose_files, clip, clip_bytes, design_input, write_documents
-from siamang.documents.catalog import SPECS, DocumentStatus
+from siamang.documents.author import (
+    Document,
+    batches,
+    choose_files,
+    clip,
+    clip_bytes,
+    design_input,
+    write_batches,
+    write_documents,
+)
+from siamang.documents.catalog import SPECS, DocumentStatus, Source, specs_for
 from siamang.documents.derive import programmer_documents, qa_documents, review_documents
-from siamang.documents.packages import plan_work, render
+from siamang.documents.packages import divide, render
 from siamang.documents.lead import (
     BRIEF_LIMIT,
     DRAFT_PROMPT,
@@ -28,6 +37,7 @@ from siamang.documents.lead import (
     TASK_PROMPT,
     ask_lead,
 )
+from siamang.jsondata import thaw
 from siamang.log import redact
 from siamang.models.errors import ModelError
 from siamang.programmer.policy import ProgrammingPolicy
@@ -75,8 +85,16 @@ CI_TIMEOUT_SECS = 60 * 60
 FINISHED_PACKAGES = ('passed', 'waiting', 'blocked', 'failed')
 
 
+DESIGN_ATTEMPTS = 3  # a design stage is tried this many times before the run gives up
+DESIGN_TIMEOUTS = (300, 450, 600)  # a model that timed out is given longer on the next try
+
+
 class DesignFailed(Exception):
     """A model failed while writing the design: there is nothing for the operator to approve."""
+
+    def __init__(self, stage='', reason='unknown', attempts=1):
+        super().__init__(f'{stage}: {reason} after {attempts} attempt(s)')
+        self.code, self.stage, self.reason, self.attempts = reason, stage, reason, attempts
 
 
 def now_seconds():
@@ -127,6 +145,12 @@ Dibuat oleh Siamang setelah disetujui operator. Merge tetap keputusan pemilik re
 
 def _stored(row):
     return Document(SPECS[row['kind']], DocumentStatus(row['status']), row['content'], row['reason'], row['model_id'])
+
+
+def _basis(task, spec, conversation, project):
+    """What the design was written for: another instruction, specification, or answer means another design."""
+    return hashlib.sha256(json.dumps([task.description, spec, conversation, project.name, project.description],
+                                     sort_keys=True, default=str).encode()).hexdigest()
 
 
 class Runtime:
@@ -180,6 +204,12 @@ class Runtime:
         policy = SandboxPolicy(box.image, timeout_secs=box.timeout_secs, memory_mb=box.memory_mb, cpus=box.cpus)
         checks = [c for c in (parse_command('test', box.test_command), parse_command('build', box.build_command)) if c]
         return VerificationService(SandboxService(CliContainerRuntime(box.runtime), policy), checks), box.verify_attempts
+
+    def execution_features(self):
+        """What this runtime will do with a run, for the UI: it must not imply a sandbox that is switched off."""
+        verifier, _ = self.verification()
+        return {'sandbox': verifier is not None, 'tools': self.tooling() is not None,
+                'recovery': self.recovery() is not None}
 
     def tooling(self):
         """The Programmer's tool runner when ``sandbox.tools`` is on, else ``None`` (the one-shot Programmer)."""
@@ -325,6 +355,116 @@ class Runtime:
             self._busy.release()
             raise
 
+    def _divide(self, db, store, engine, run_id, task, spec, conversation, repository, design, basis='', fresh=False):
+        """The Analyst's division and its document. Returns ``False`` when the owner must answer first.
+
+        The document says what really happened: a division that failed is never reported as one Programmer being enough.
+        """
+        task_id, row = task.task_id, SPECS['work_packages']
+        earlier = store.reusable_documents(task_id, run_id, basis).get('work_packages') if basis and not fresh else None
+        if earlier:  # a retry of the same brief: the division stands, and the model is not paid to repeat it
+            store.copy_packages(earlier['run_id'], run_id)
+            store.save_documents(run_id, task_id, (Document(row, DocumentStatus.GENERATED, earlier['content'], model_id=earlier['model_id']),), basis)
+            return True
+        if repository is None:
+            store.set_work_packages(run_id, ())
+            store.save_documents(run_id, task_id, (Document(row, DocumentStatus.NOT_APPLICABLE, reason='Task tanpa repositori dikerjakan satu Programmer.'),))
+            return True
+
+        tries = sum(p['stage'] == 'division' for p in store.design_parts(task_id))  # a redivision adds to the record
+
+        def started(attempt, timeout):
+            store.start_part(run_id, 'division', 1, tries + attempt, ('work_packages',), timeout)
+
+        def ended(attempt, began, finished, failure):
+            store.finish_part(run_id, 'division', 1, tries + attempt, state='failed' if failure else 'done', reason=failure or None,
+                              model_id=None, started_at=began, finished_at=finished)
+
+        division = divide(self.author('analyst'), dict(
+            instruction=task.description, project_spec=spec, task_conversation=conversation, repository=repository,
+            design=[dict(document=d.spec.kind, text=clip(d.content, 3_000)) for d in design
+                    if d.status is DocumentStatus.GENERATED]), started, ended)
+        work = division.plan
+        if work and work.undecided:
+            store.add_message(task.project_id, task_id, 'lead', dict(
+                message='Sebelum tim dibagi, ada keputusan teknis yang belum disepakati.',
+                questions=[dict(question=q, options=[]) for q in work.undecided]))
+            with db.transaction():
+                if self._closing or engine.get(task_id).status == 'cancelled':
+                    raise Stopped()
+                engine.wait(task_id, reason='clarification_required')
+                store.update(run_id, state='waiting', phase='clarification', wait_reason='clarification_required')
+            return False
+        store.set_work_packages(run_id, work.packages if work else ())
+        if work and work.packages:
+            document = Document(row, DocumentStatus.GENERATED, render(work))
+        elif division.failure:
+            document = Document(row, DocumentStatus.FAILED, reason=(
+                f'Pembagian kerja gagal setelah {division.attempts} percobaan: {division.failure}. '
+                'Bagi ulang, atau bila desain disetujui sekarang, satu Programmer mengerjakan semuanya.')[:500])
+        else:
+            document = Document(row, DocumentStatus.NOT_APPLICABLE, reason=(
+                f'Analyst menilai cukup satu Programmer: {division.single_reason}' if division.single_reason
+                else 'Analyst menilai cukup satu Programmer, tanpa menuliskan alasannya.')[:500])
+        store.save_documents(run_id, task_id, (document,), basis if document.status is DocumentStatus.GENERATED else '')
+        return True
+
+    def redivide(self, task_id):
+        """Only the division again, for a design waiting at the gate: the documents stay, and so does the gate."""
+        with Database(self.settings.database) as db:
+            store, engine = RunStore(db), TaskEngine(db, ProjectRegistry(db))
+            task, row = engine.get(task_id), store.latest(task_id)
+            if not row or row['state'] != 'waiting' or row['wait_reason'] != 'design_approval' or task.status != 'waiting':
+                raise RuntimeRefusal('design_not_pending')
+            if self._closing or not self._pool:
+                raise RuntimeRefusal('runtime_unavailable', 503)
+            if not self._busy.acquire(blocking=False):
+                raise RuntimeRefusal('worker_busy', 409)
+            try:
+                with db.transaction():
+                    engine.start(task_id)
+                    store.update(row['run_id'], state='running', phase='analysis', redivide=True)
+                self._pool.submit(self._redivide, row['run_id'])
+            except BaseException:
+                self._busy.release()
+                raise
+            return dict(task_id=task_id, run_id=row['run_id'], scheduled=True)
+
+    def _redivide(self, run_id):
+        done = threading.Event()
+        pulse = threading.Thread(target=self._heartbeat, args=(run_id, done), daemon=True)
+        pulse.start()
+        try:
+            with Database(self.settings.database) as db:
+                engine, store = TaskEngine(db, ProjectRegistry(db)), RunStore(db)
+                task_id = store.get(run_id)['task_id']
+                try:
+                    task = engine.get(task_id)
+                    project = ProjectRegistry(db).get(task.project_id)
+                    design = tuple(_stored(r) for r in store.documents(task_id, run_id) if r['stage'] in DESIGN_STAGES)
+                    repo = store.repo(task.project_id)
+                    spec = (store.spec(task.project_id) or {}).get('content', '')
+                    conversation = store.messages(task.project_id, task_id)
+                    if not self._divide(db, store, engine, run_id, task, spec, conversation,
+                                        read_context(self._repos, project.root_path) if repo else None, design,
+                                        _basis(task, spec, conversation, project), fresh=True):
+                        return
+                except Stopped:
+                    return
+                except Exception as exc:  # noqa: BLE001 - the design is still good: only this try is lost
+                    store.save_documents(run_id, task_id, (Document(
+                        SPECS['work_packages'], DocumentStatus.FAILED,
+                        reason=f"Bagi ulang gagal: {getattr(exc, 'code', type(exc).__name__)}"),))
+                with db.transaction():
+                    if engine.get(task_id).status == 'cancelled':
+                        return
+                    engine.wait(task_id, reason='design_approval')
+                    store.update(run_id, state='waiting', phase='design_approval', wait_reason='design_approval')
+        finally:
+            done.set()
+            pulse.join()
+            self._busy.release()
+
     def _heartbeat(self, run_id, done):
         while not done.wait(3):
             with Database(self.settings.database) as db:
@@ -340,22 +480,66 @@ class Runtime:
                 row = store.get(run_id)
                 task_id = row['task_id']
 
-                def phase(name, iteration=None):
+                state = dict(basis='')
+
+                def phase(name, iteration=None, **note):
                     with db.transaction():
                         if self._closing or engine.get(task_id).status == 'cancelled':
                             raise Stopped()
-                        store.update(run_id, state='running', phase=name, iteration=iteration)
+                        store.update(run_id, state='running', phase=name, iteration=iteration, **note)
+
+                def reused_for(stage):
+                    """What an earlier run of this task already finished for the stage, on the same basis."""
+                    kinds = {s.kind for s in specs_for(stage, Source.AUTHORED)}
+                    return {k: Document(SPECS[k], DocumentStatus.GENERATED, r['content'], model_id=r['model_id'])
+                            for k, r in store.reusable_documents(task_id, run_id, state['basis']).items() if k in kinds}
 
                 def documents(stage, context, *, required=False):
                     agent = next(s.agent for s in SPECS.values() if s.stage == stage)
                     router = self.author(agent)
-                    if router is not None:
-                        phase(stage, iteration=None)
-                    written = write_documents(router, stage, context)
-                    store.save_documents(run_id, task_id, written)
-                    if required and any(d.status is DocumentStatus.FAILED for d in written):
-                        raise DesignFailed()
-                    return written
+                    if not (required and router is not None):
+                        if router is not None:
+                            phase(stage, iteration=None)
+                        written = write_documents(router, stage, context)
+                        store.save_documents(run_id, task_id, written)
+                        return written
+                    # The stage is several model calls side by side. A round repeats only what failed, with more time,
+                    # and each round is its own history row so the owner can see how often a stage was repeated.
+                    done = reused_for(stage)
+                    pending = [g for g in (tuple(k for k in group if k not in done) for group in batches(stage)) if g]
+                    if done:
+                        store.save_documents(run_id, task_id, tuple(done.values()), state['basis'])
+                    if not pending:
+                        phase(stage, iteration=None, reused=len(done))  # the history shows it was kept, not rewritten
+                        return tuple(done[k] for g in batches(stage) for k in g)
+                    reason = None
+                    numbered = {k: i for i, g in enumerate(batches(stage), 1) for k in g}
+                    for attempt in range(1, DESIGN_ATTEMPTS + 1):
+                        phase(stage, iteration=None, attempt=attempt, retry_reason=reason,
+                              remaining=sum(map(len, pending)) if attempt > 1 else None,
+                              reused=len(done) if attempt == 1 and done else None)
+                        timeout = DESIGN_TIMEOUTS[min(attempt, len(DESIGN_TIMEOUTS)) - 1]
+                        for group in pending:
+                            store.start_part(run_id, stage, numbered[group[0]], attempt, group, timeout)
+
+                        def finished(group, written, started, ended):
+                            # As each part ends, so its documents and its timing are there to see while the others still run.
+                            store.save_documents(run_id, task_id, written, state['basis'])
+                            bad = next((d.reason or 'unknown' for d in written if d.status is DocumentStatus.FAILED), None)
+                            store.finish_part(run_id, stage, numbered[group[0]], attempt, state='failed' if bad else 'done',
+                                              reason=bad, model_id=written[0].model_id if written else None,
+                                              started_at=started, finished_at=ended)
+
+                        written = write_batches(router, stage, pending, context, timeout, on_done=finished)
+                        failed = [d for d in written if d.status is DocumentStatus.FAILED]
+                        done |= {d.spec.kind: d for d in written if d.status is not DocumentStatus.FAILED}
+                        if not failed:
+                            return tuple(done[k] for g in batches(stage) for k in g)
+                        reason = failed[0].reason or 'unknown'
+                        again = {d.spec.kind for d in failed}
+                        pending = [tuple(k for k in g if k in again) for g in pending]
+                        pending = [g for g in pending if g]
+                    raise DesignFailed(stage, reason, DESIGN_ATTEMPTS)
 
                 with db.transaction():
                     if engine.get(task_id).status == 'cancelled':
@@ -389,7 +573,10 @@ class Runtime:
                 if repo:
                     brief |= dict(project_spec=spec, task_conversation=conversation,
                                   repository=read_context(self._repos, project.root_path))
-                if gated and repo and self.author('lead') and not store.draft_of_task(task_id):  # a draft already asked
+                # A retry resumes from what an earlier run finished, but only for the same instruction, specification and answers.
+                state['basis'] = _basis(task, spec, conversation, project)
+                briefed = len(reused_for('briefing')) == len(specs_for('briefing', Source.AUTHORED))  # the Lead already cleared this
+                if gated and repo and self.author('lead') and not briefed and not store.draft_of_task(task_id):  # a draft already asked
                     rounds = sum(1 for m in store.messages(task.project_id, task_id) if m['role'] == 'lead')
                     reply = ask_lead(self.author('lead'), TASK_PROMPT,
                                      brief | dict(rounds_left=max(MAX_TASK_ROUNDS - rounds, 0)))
@@ -407,30 +594,9 @@ class Runtime:
                     for stage in DESIGN_STAGES:
                         prior = {d.spec.kind: clip(d.content) for d in design if d.status is DocumentStatus.GENERATED}
                         design += documents(stage, brief | dict(prior_documents=prior), required=True)
-                    if repo:
-                        work = plan_work(self.author('analyst'), dict(
-                            instruction=task.description, project_spec=spec, task_conversation=conversation,
-                            repository=brief['repository'],
-                            design=[dict(document=d.spec.kind, text=clip(d.content, 3_000)) for d in design
-                                    if d.status is DocumentStatus.GENERATED]))
-                        if work and work.undecided:
-                            store.add_message(task.project_id, task_id, 'lead', dict(
-                                message='Sebelum tim dibagi, ada keputusan teknis yang belum disepakati.',
-                                questions=[dict(question=q, options=[]) for q in work.undecided]))
-                            with db.transaction():
-                                if self._closing or engine.get(task_id).status == 'cancelled':
-                                    raise Stopped()
-                                engine.wait(task_id, reason='clarification_required')
-                                store.update(run_id, state='waiting', phase='clarification',
-                                             wait_reason='clarification_required')
-                            return
-                        store.set_work_packages(run_id, work.packages if work else ())
-                    else:
-                        work = None
-                    spec_row = SPECS['work_packages']
-                    store.save_documents(run_id, task_id, (
-                        Document(spec_row, DocumentStatus.GENERATED, render(work)) if work and work.packages else
-                        Document(spec_row, DocumentStatus.NOT_APPLICABLE, reason='Cukup satu Programmer untuk pekerjaan ini.'),))
+                    if not self._divide(db, store, engine, run_id, task, spec, conversation,
+                                        brief['repository'] if repo else None, design, state['basis']):
+                        return
                     with db.transaction():
                         if self._closing or engine.get(task_id).status == 'cancelled':
                             raise Stopped()
@@ -500,6 +666,8 @@ class Runtime:
                         if ctx.subtask:
                             extra['recovery_part'] = ctx.subtask[:200]
                         state['verification'] = None
+                        if ctx.attempt > 1:
+                            phase('recovering', ctx.attempt, attempt=ctx.attempt)  # the Lead steps in; shown as such, never as plain programming
                         state['loop'] = run = run_loop(extra)
                         if str(run.stop_reason) == 'programmer_waiting':
                             return StageOutcome(True, dict(waiting=True))
@@ -515,7 +683,7 @@ class Runtime:
                                 project.root_path, run.final_patch.changes, verify.criteria_from(design))
                             output['verification'] = report.to_dict()
                             if report.status == 'failed':
-                                return StageOutcome(False, failure=json.dumps(report.feedback())[:700])
+                                return StageOutcome(False, failure=verify.failure_text(report))
                         return StageOutcome(True, output, compromise=note)
 
                     def replan(remaining, failure):
@@ -575,8 +743,11 @@ class Runtime:
                 bundle = json.dumps({'version': 1, 'plan': encode(plan), 'analysis': encode(analysis),
                                      'loop': encode(loop)}, sort_keys=True, separators=(',', ':'))
                 seal = self._sign(run_id, task_id, bundle)
+                made = thaw(programmer.last.metadata) if getattr(programmer, 'last', None) else {}
+                sandbox = {k[len('sandbox_'):]: v for k, v in made.items() if k.startswith('sandbox_')}
                 report = json.dumps(dict(plan=plan.to_dict(), analysis=analysis.to_dict(), loop=loop.to_dict(),
                                         **(dict(verification=verification.to_dict()) if verification else {}),
+                                        **(dict(programmer_sandbox=sandbox) if sandbox else {}),
                                         **(dict(recovery=recovered.to_dict()) if recovered else {})))
                 with db.transaction():
                     if self._closing or engine.get(task_id).status == 'cancelled':
@@ -629,8 +800,11 @@ class Runtime:
                                      wait_reason='worker_interrupted')
                     else:
                         engine.fail(task.task_id, TaskFailure('PIPELINE_FAILED', 'Proposal pipeline failed.',
-                                                             retryable=True, details={'cause': str(getattr(exc, 'code', type(exc).__name__))}))
-                        store.update(run_id, state='failed', phase='failed')
+                                                             retryable=True,
+                                                             details={'cause': str(getattr(exc, 'code', type(exc).__name__)),
+                                                                      **({'stage': exc.stage, 'attempts': exc.attempts} if isinstance(exc, DesignFailed) else {})}))
+                        store.update(run_id, state='failed', phase='failed', retry_reason=getattr(exc, 'code', None),
+                                     attempt=getattr(exc, 'attempts', None))
         finally:
             done.set()
             if pulse.is_alive():

@@ -200,7 +200,7 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
     @app.get('/v0/health')
     async def health(principal=Depends(permission('read')), db=Depends(database)):
         return {'status': 'healthy' if not db.check() else 'unhealthy', 'version': __version__,
-                'contract_version': '0.6', 'core_schema': 3, 'api_schema': 4, 'observed_at': now()}
+                'contract_version': '0.6', 'core_schema': 3, 'api_schema': 5, 'observed_at': now()}
 
     @app.get('/v0/capabilities')
     async def capabilities(principal=Depends(permission('read'))):
@@ -212,11 +212,12 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
         return {'transport': 'http', 'updates': 'polling', 'streaming': False, 'proposal_only': True,
                 'patch_application': False, 'publishing': 'pull_request_only', 'model_configured': configured, 'permissions': sorted(principal.permissions),
                 'agent_models': runtime.assignments(),
+                'execution': runtime.execution_features(),
                 'documents': [dict(agent=s.agent, stage=s.stage, kind=s.kind, title=s.title, source=str(s.source))
                               for s in CATALOG],
                 'task_statuses': [s.value for s in TaskStatus],
                 'execution_phases': ['queued', 'clarification', 'briefing', 'planning', 'analysis', 'design_approval', 'programming',
-                                     'qa', 'reviewing', 'reporting', 'awaiting_approval', 'blocked', 'interrupted', 'finished', 'failed', 'cancelled']}
+                                     'qa', 'verifying', 'recovering', 'reviewing', 'reporting', 'awaiting_approval', 'blocked', 'interrupted', 'finished', 'failed', 'cancelled']}
 
     # Plain def: asking Ollama for its tags must not hold up the event loop.
     @app.get('/v0/settings/models')
@@ -462,6 +463,7 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
             t = scoped_task(db, task_id, principal)
             return public(t.to_dict()) | {'execution': execution_snapshot(t, store), 'feature_id': store.feature_of(task_id),
                                           'branch': public(store.branch(task_id)), 'packages': public(store.public_packages(task_id)),
+                                          'design_parts': public(store.design_parts(task_id)),
                                           'ci': public(store.ci(task_id)), 'observed_at': now()}
 
     @app.get('/v0/tasks/{task_id}/messages')
@@ -518,6 +520,11 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
         scoped_task(db, task_id, principal)
         return public(runtime.cancel(task_id).to_dict())
 
+    @app.post('/v0/tasks/{task_id}/work-division', status_code=202)
+    async def redivide(task_id: str, principal=Depends(permission('run')), db=Depends(database)):
+        scoped_task(db, task_id, principal)
+        return public(runtime.redivide(task_id))
+
     @app.post('/v0/tasks/{task_id}/retry')
     async def retry(task_id: str, principal=Depends(permission('retry')), db=Depends(database)):
         scoped_task(db, task_id, principal)
@@ -531,7 +538,10 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
         items = []
         for row in rows:
             plan, analysis, loop = runtime.load_bundle(dict(row))
+            stored = json.loads(row['report'] or '{}')
             items.append({'run_id': row['run_id'], 'plan': plan.to_dict(),
+                          'verification': stored.get('verification'), 'recovery': stored.get('recovery'),
+                          'programmer_sandbox': stored.get('programmer_sandbox'),
                           'analysis': analysis.to_dict(), 'loop': loop.to_dict(),
                           'patch': loop.final_patch.to_dict() if loop.final_patch else None,
                           'qa': loop.final_qa_result.to_dict() if loop.final_qa_result else None,
@@ -551,8 +561,11 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
             if not all((loop.final_patch, loop.final_qa_result, loop.final_review_result)):
                 continue
             request = runtime.evidence(dict(row))
+            stored = json.loads(row['report'] or '{}')
             items.append({'run_id': row['run_id'], 'task_id': row['task_id'],
                           'eligible': request.loop_result.passed, 'wait_reason': row['wait_reason'],
+                          'verification': (stored.get('verification') or {}).get('status'),
+                          'recovery': (stored.get('recovery') or {}).get('status'),
                           'provenance': request.provenance.to_dict()})
         return {'items': items}
 

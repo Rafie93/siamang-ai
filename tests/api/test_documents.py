@@ -1,5 +1,6 @@
 """Agent documents, the design gate, and the project portfolio over the real pipeline."""
 import json
+import threading
 import time
 
 import pytest
@@ -8,9 +9,9 @@ pytest.importorskip('fastapi')
 from fastapi.testclient import TestClient
 
 from siamang.api.app import create_app
-from siamang.documents.author import DESIGN_BUDGET_BYTES, Document, design_input, write_documents
+from siamang.documents.author import DESIGN_BUDGET_BYTES, Document, batches, design_input, shape_of, write_documents
 from siamang.documents.catalog import CATALOG, SPECS, DocumentStatus, Source
-from siamang.models.errors import RateLimitedError
+from siamang.models.errors import ModelTimeoutError, RateLimitedError
 from siamang.storage import Database
 from tests.api.test_http import headers, submit, wait, world  # noqa: F401
 from tests.support.loop import CLEAN
@@ -134,6 +135,167 @@ def test_design_model_failure_fails_the_task_and_records_why(world, team):
         written = documents(client, task_id)
         assert written['prd']['status'] == 'failed' and written['prd']['reason'] == 'rate_limited'
         assert 'srs' not in written
+
+
+def flaky(slow_below):
+    """An author that times out whenever it is given less than ``slow_below`` seconds, else writes every document."""
+    calls = []
+
+    def answer(model, request):
+        calls.append(request.timeout_secs)
+        if request.timeout_secs < slow_below:
+            raise ModelTimeoutError('too slow')
+        return author_answer(model, request)
+    return make_model(answer, structured=True), calls
+
+
+def author_answer(model, request):
+    kinds = request.json_schema['properties']['documents']['items']['properties']['kind']['enum']
+    return json.dumps({'documents': [{'kind': k, 'applicable': True, 'content': f'isi {k}', 'reason': ''} for k in kinds]})
+
+
+def test_a_design_stage_is_several_small_calls_not_one_big_one(world, team):
+    team['analyst'], calls = flaky(0)
+    with TestClient(app(world, team)) as client:
+        task_id = submit(client, world[1])
+        client.post(f'/v0/tasks/{task_id}/run', headers=headers())
+        assert wait_for_state(client, task_id, 'waiting')['execution']['wait_reason'] == 'design_approval'
+        written = documents(client, task_id)
+    assert all(written[k]['status'] == 'generated' for k in ('srs', 'architecture', 'erd', 'api_spec', 'technical_design'))
+    assert len(batches('analysis')) == 3 and max(map(len, batches('analysis'))) <= 3
+
+
+def test_a_design_stage_that_times_out_is_retried_with_more_time_and_the_history_counts_it(world, team):
+    team['analyst'], calls = flaky(450)
+    with TestClient(app(world, team)) as client:
+        task_id = submit(client, world[1])
+        client.post(f'/v0/tasks/{task_id}/run', headers=headers())
+        assert wait_for_state(client, task_id, 'waiting')['execution']['wait_reason'] == 'design_approval'
+        events = client.get(f'/v0/tasks/{task_id}/execution-events?limit=100', headers=headers()).json()['items']
+    analysis = [e for e in events if e['phase'] == 'analysis']
+    assert [e.get('attempt') for e in analysis] == [1, 2]
+    assert [e.get('retry_reason') for e in analysis] == [None, 'timeout']
+    assert analysis[1]['remaining'] > 0
+
+
+def test_a_design_stage_gives_up_after_its_attempts_and_says_which_stage_and_why(world, team):
+    team['analyst'], calls = flaky(10_000)
+    with TestClient(app(world, team)) as client:
+        task_id = submit(client, world[1])
+        client.post(f'/v0/tasks/{task_id}/run', headers=headers())
+        snapshot = wait(client, task_id)
+    assert snapshot['status'] == 'failed' and len(calls) == 3 * len(batches('analysis'))
+    details = snapshot['last_error']['details']
+    assert (details['cause'], details['stage'], details['attempts']) == ('timeout', 'analysis', 3)
+
+
+def test_only_the_part_that_failed_is_written_again(world, team):
+    kinds_asked = []
+
+    def answer(model, request):
+        kinds = request.json_schema['properties']['documents']['items']['properties']['kind']['enum']
+        kinds_asked.append((request.timeout_secs, tuple(kinds)))
+        if 'erd' in kinds and request.timeout_secs < 450:
+            raise ModelTimeoutError('too slow')
+        return author_answer(model, request)
+    team['analyst'] = make_model(answer, structured=True)
+    with TestClient(app(world, team)) as client:
+        task_id = submit(client, world[1])
+        client.post(f'/v0/tasks/{task_id}/run', headers=headers())
+        wait_for_state(client, task_id, 'waiting')
+    again = [k for t, k in kinds_asked if t == 450]
+    assert again == [('class_diagram', 'erd', 'sequence_diagram')]
+
+
+def test_a_retry_resumes_at_the_stage_that_failed_and_does_not_rewrite_the_earlier_ones(world, team):
+    broken = {'on': True}
+
+    def analyst(model, request):
+        if broken['on']:
+            raise ModelTimeoutError('too slow')
+        return author_answer(model, request)
+    team['analyst'] = make_model(analyst, structured=True)
+    with TestClient(app(world, team)) as client:
+        task_id = submit(client, world[1])
+        client.post(f'/v0/tasks/{task_id}/run', headers=headers())
+        assert wait(client, task_id)['status'] == 'failed'
+        asked = {a: len(team[a].requests) for a in ('lead', 'planner')}
+        assert asked['lead'] and asked['planner']
+
+        broken['on'] = False
+        assert client.post(f'/v0/tasks/{task_id}/retry', headers=headers()).status_code == 200
+        client.post(f'/v0/tasks/{task_id}/run', headers=headers())
+        assert wait_for_state(client, task_id, 'waiting')['execution']['wait_reason'] == 'design_approval'
+        written = documents(client, task_id)
+        events = client.get(f'/v0/tasks/{task_id}/execution-events?limit=100', headers=headers()).json()['items']
+    assert {a: len(team[a].requests) for a in ('lead', 'planner')} == asked  # not asked again
+    assert all(written[k]['status'] == 'generated' for k in ('project_brief', 'prd', 'srs', 'technical_design'))
+    last_run = events[-1]['run_id']
+    for stage in ('briefing', 'planning'):
+        assert any(e.get('reused') for e in events if e['run_id'] == last_run and e['phase'] == stage)
+
+
+def test_a_retry_after_the_owner_changed_the_brief_writes_everything_again(world, team):
+    broken = {'on': True}
+
+    def analyst(model, request):
+        if broken['on']:
+            raise ModelTimeoutError('too slow')
+        return author_answer(model, request)
+    team['analyst'] = make_model(analyst, structured=True)
+    with TestClient(app(world, team)) as client:
+        task_id = submit(client, world[1])
+        client.post(f'/v0/tasks/{task_id}/run', headers=headers())
+        assert wait(client, task_id)['status'] == 'failed'
+        before = len(team['planner'].requests)
+        with Database(world[0].database) as db:  # another instruction: the earlier documents were written for a different one
+            db.conn.execute('UPDATE tasks SET description=description || \' Tambahan.\' WHERE task_id=?', (task_id,))
+        broken['on'] = False
+        client.post(f'/v0/tasks/{task_id}/retry', headers=headers())
+        client.post(f'/v0/tasks/{task_id}/run', headers=headers())
+        wait_for_state(client, task_id, 'waiting')
+    assert len(team['planner'].requests) > before
+
+
+def test_each_part_of_a_stage_records_real_times_that_prove_it_ran_side_by_side(world, team):
+    together = threading.Barrier(len(batches('analysis')))  # passes only if all the parts are inside the model at once
+
+    def analyst(model, request):
+        together.wait(10)
+        return author_answer(model, request)
+    team['analyst'] = make_model(analyst, structured=True)
+    with TestClient(app(world, team)) as client:
+        task_id = submit(client, world[1])
+        client.post(f'/v0/tasks/{task_id}/run', headers=headers())
+        snapshot = wait_for_state(client, task_id, 'waiting')
+    parts = [p for p in snapshot['design_parts'] if p['stage'] == 'analysis']
+    assert [(p['part'], p['attempt'], p['state']) for p in parts] == [(1, 1, 'done'), (2, 1, 'done'), (3, 1, 'done')]
+    assert sorted(k for p in parts for k in p['kinds']) == sorted(k for g in batches('analysis') for k in g)
+    assert max(p['started_at'] for p in parts) <= min(p['finished_at'] for p in parts)  # they overlap
+    assert {p['model_id'] for p in parts} != {None} and parts[0]['timeout_secs'] == 300
+
+
+def test_a_part_that_fails_is_recorded_with_its_reason_and_tried_again_alone(world, team):
+    def analyst(model, request):
+        kinds = request.json_schema['properties']['documents']['items']['properties']['kind']['enum']
+        if 'erd' in kinds and request.timeout_secs < 450:
+            raise ModelTimeoutError('too slow')
+        return author_answer(model, request)
+    team['analyst'] = make_model(analyst, structured=True)
+    with TestClient(app(world, team)) as client:
+        task_id = submit(client, world[1])
+        client.post(f'/v0/tasks/{task_id}/run', headers=headers())
+        snapshot = wait_for_state(client, task_id, 'waiting')
+    parts = [(p['part'], p['attempt'], p['state'], p['reason']) for p in snapshot['design_parts'] if p['stage'] == 'analysis']
+    assert sorted(parts) == [(1, 1, 'done', None), (2, 1, 'failed', 'timeout'), (2, 2, 'done', None), (3, 1, 'done', None)]
+
+
+def test_a_huge_folder_does_not_hide_the_small_ones_from_the_model():
+    names = [f'app/a{i}.php' for i in range(120)] + [f'public/x{i}.svg' for i in range(2900)] + [f'resources/r{i}.blade.php' for i in range(60)] + ['routes/web.php', 'composer.json']
+    shown, counts = shape_of(names, 400)
+    assert len(shown) == 400 and counts == {'app': 120, 'public': 2900, 'resources': 60, 'routes': 1, '.': 1}
+    assert 'routes/web.php' in shown and 'composer.json' in shown and sum(n.startswith('resources/') for n in shown) == 60
+    assert shape_of(['a.py'], 400) == (['a.py'], {'.': 1})
 
 
 def test_closing_model_failure_is_recorded_and_keeps_the_proposal(world, team):
