@@ -41,3 +41,6 @@ siamang.toml
 
 # Web interface dependencies
 node_modules/
+
+# Original screenshots; README uses the PNG copies
+docs/images/readme/*.heic

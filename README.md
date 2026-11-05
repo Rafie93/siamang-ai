@@ -24,6 +24,7 @@
 
 <p align="center">
   <a href="#overview">Overview</a> ·
+  <a href="#demo">Demo</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="#web-interface">Web Interface</a> ·
   <a href="#cli">CLI</a> ·
@@ -43,7 +44,27 @@ It stands alone: no external control plane, and the core uses nothing beyond the
 > [!IMPORTANT]
 > **v0.3.0 is early.** Siamang runs locally for one operator and is not ready for the internet. Full autonomy is still in progress. In the default configuration two gates need your approval and Siamang does not run project code, so test results come only from GitHub CI. See [Features](#features).
 
-### Why Siamang
+## Demo
+
+These screenshots come from a real run: a task on a small landing page project, with `claude-opus` as the model. The interface text is in Indonesian.
+
+### How it works: the team divides the work
+
+<a href="./docs/images/readme/cara-kerja-membagi-part.png">
+  <img src="./docs/images/readme/cara-kerja-membagi-part.png" alt="The Architect panel during a real run: design documents split into three parts running at the same time. Part 2 is finished after 2 minutes 17 seconds, and parts 1 and 3 are still being written after 2 minutes 28 seconds." width="100%">
+</a>
+
+Instead of one long model call, the Architect's design documents are split into parts that run at the same time. Click any agent to see what it is doing now: which documents each part is writing, how long it has been running, and what is finished. The line "3 parts running at the same time" is computed from the times the backend records, not assumed.
+
+### The result: documents you can read
+
+<a href="./docs/images/readme/bukti-nyata-kerja.png">
+  <img src="./docs/images/readme/bukti-nyata-kerja.png" alt="The Documents page with one tab per agent and a count of finished documents. Each document is labelled as written by claude-opus, and an open Class Diagram is drawn on the page." width="100%">
+</a>
+
+Each agent's output has its own tab, and diagrams are drawn on the page. Every document says where it came from: here, *Tulisan model · claude-opus* means it was written by a model. These are drafts, not evidence, and the page says so. Programmer, QA and Reviewer still show 0 because coding starts only after you approve the design.
+
+## Why Siamang
 
 Coding agents often report "all tests pass". In Siamang, a model cannot make that claim.
 

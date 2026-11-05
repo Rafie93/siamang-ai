@@ -24,6 +24,7 @@
 
 <p align="center">
   <a href="#ringkasan">Ringkasan</a> ·
+  <a href="#demo">Demo</a> ·
   <a href="#mulai-cepat">Mulai Cepat</a> ·
   <a href="#antarmuka-web">Antarmuka Web</a> ·
   <a href="#cli">CLI</a> ·
@@ -43,7 +44,27 @@ Siamang berdiri sendiri: tanpa control plane eksternal, dan intinya tanpa depend
 > [!IMPORTANT]
 > **v0.3.0 masih tahap awal.** Siamang berjalan lokal untuk satu operator dan belum siap dipasang di internet. Otonomi penuh masih dalam pengerjaan. Pada konfigurasi bawaan, dua gerbang wajib disetujui manusia dan Siamang tidak menjalankan kode proyek, sehingga hasil test hanya berasal dari CI GitHub. Lihat [Fitur](#fitur).
 
-### Mengapa Siamang
+## Demo
+
+Screenshot berikut berasal dari run sungguhan: satu task pada proyek landing page kecil, dengan model `claude-opus`.
+
+### Cara kerja: tim membagi pekerjaan
+
+<a href="./docs/images/readme/cara-kerja-membagi-part.png">
+  <img src="./docs/images/readme/cara-kerja-membagi-part.png" alt="Panel Arsitek saat run sungguhan: dokumen desain dibagi menjadi tiga bagian yang berjalan bersamaan. Bagian 2 selesai dalam 2 menit 17 detik, sedangkan bagian 1 dan 3 masih ditulis setelah 2 menit 28 detik." width="100%">
+</a>
+
+Daripada satu panggilan model yang panjang, dokumen desain Arsitek dibagi menjadi beberapa bagian yang berjalan bersamaan. Klik agen mana pun untuk melihat apa yang sedang dikerjakannya: dokumen yang ditulis tiap bagian, lama berjalannya, dan yang sudah selesai. Kalimat "3 bagian berjalan bersamaan" dihitung dari jam yang dicatat backend, bukan diasumsikan.
+
+### Hasil: dokumen yang bisa Anda baca
+
+<a href="./docs/images/readme/bukti-nyata-kerja.png">
+  <img src="./docs/images/readme/bukti-nyata-kerja.png" alt="Halaman Documents dengan satu tab per agen dan jumlah dokumen yang selesai. Tiap dokumen berlabel ditulis oleh claude-opus, dan Class Diagram yang dibuka tergambar di halaman." width="100%">
+</a>
+
+Hasil kerja tiap agen punya tab sendiri, dan diagram langsung tergambar di halaman. Setiap dokumen menyatakan asalnya: di sini, *Tulisan model · claude-opus* berarti ditulis oleh model. Dokumen seperti ini adalah draf, bukan bukti, dan halamannya menyatakan hal itu. Programmer, QA, dan Reviewer masih 0 karena coding baru dimulai setelah Anda menyetujui desain.
+
+## Mengapa Siamang
 
 Agen coding sering melaporkan "semua test lulus". Di Siamang, model tidak bisa membuat klaim itu.
 
