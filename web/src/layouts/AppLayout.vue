@@ -1,0 +1,97 @@
+<script setup>
+import { LaptopMinimal, Menu, Monitor, Moon, RefreshCw, Sun } from '@lucide/vue'
+import { computed, ref, watch } from 'vue'
+import { RouterLink, RouterView, useRoute } from 'vue-router'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import PageHeader from '@/components/PageHeader.vue'
+import AppTag from '@/components/ui/AppTag.vue'
+import { useTheme } from '@/composables/useTheme'
+import { pages } from '@/router'
+import { useOfficeStore } from '@/stores/office'
+
+const office = useOfficeStore()
+const route = useRoute()
+const { mode, cycle } = useTheme()
+
+const navOpen = ref(false)
+const navPages = pages.filter(p => p.icon)
+const themeIcon = computed(() => ({ light: Sun, dark: Moon, system: Monitor })[mode.value])
+const themeLabel = computed(
+  () => ({ light: 'Tema terang', dark: 'Tema gelap', system: 'Tema mengikuti sistem' })[mode.value],
+)
+const connection = computed(() => {
+  if (office.loading) return { tone: '', text: 'Menghubungkan…' }
+  return office.connected
+    ? { tone: 'success', text: 'Backend tersambung' }
+    : { tone: 'error', text: 'Backend tidak tersedia' }
+})
+
+watch(
+  () => route.fullPath,
+  () => {
+    navOpen.value = false
+  },
+)
+</script>
+
+<template>
+  <aside class="sidebar" :class="{ open: navOpen }">
+    <RouterLink class="brand" :to="{ name: 'office' }">
+      <img src="/logo.png" alt="" width="34" height="34" />
+      <span><strong>Siamang</strong><small>Tim engineering AI</small></span>
+    </RouterLink>
+
+    <nav class="nav" aria-label="Workspace">
+      <RouterLink
+        v-for="p in navPages"
+        :key="p.name"
+        class="nav-item"
+        :class="{ 'nav-parent-active': route.meta.parent === p.name }"
+        :to="{ name: p.name }"
+      >
+        <component :is="p.icon" :size="17" aria-hidden="true" />
+        {{ p.title }}
+        <span v-if="p.name === 'approvals' && office.approvals.length" class="nav-badge">
+          {{ office.approvals.length }}
+        </span>
+      </RouterLink>
+    </nav>
+
+    <div class="local-note">
+      <strong><LaptopMinimal :size="14" aria-hidden="true" /> Berjalan di laptop Anda</strong>
+      Token tetap di server lokal, dengan database terisolasi.
+    </div>
+  </aside>
+  <div v-if="navOpen" class="scrim" @click="navOpen = false" />
+
+  <div class="main">
+    <header class="topbar">
+      <button type="button" class="icon-btn topbar-menu" aria-label="Buka menu" @click="navOpen = true">
+        <Menu :size="20" aria-hidden="true" />
+      </button>
+      <span class="topbar-crumb truncate"
+        >Workspace / <b>{{ route.meta.title }}</b></span
+      >
+      <span class="topbar-spacer" />
+      <AppTag :tone="connection.tone">{{ connection.text }}</AppTag>
+      <button
+        type="button"
+        class="icon-btn"
+        aria-label="Refresh data"
+        :disabled="office.loading"
+        @click="office.refresh"
+      >
+        <RefreshCw :size="16" aria-hidden="true" />
+      </button>
+      <button type="button" class="icon-btn" :aria-label="themeLabel" :title="themeLabel" @click="cycle">
+        <component :is="themeIcon" :size="16" aria-hidden="true" />
+      </button>
+    </header>
+
+    <main class="content">
+      <PageHeader />
+      <RouterView />
+    </main>
+    <ConfirmDialog />
+  </div>
+</template>

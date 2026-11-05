@@ -38,3 +38,6 @@ dist/
 
 # Laptop-specific model configuration
 siamang.toml
+
+# Web interface dependencies
+node_modules/

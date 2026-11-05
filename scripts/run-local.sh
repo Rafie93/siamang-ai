@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 credentials="${HOME}/.config/siamang/local.env"
 
 if [[ ! -f "$credentials" ]]; then
-    echo "Kredensial lokal belum tersedia: ~/.config/siamang/local.env" >&2
+    echo "Local credentials not found. Create them first: python3 scripts/init-credentials.py" >&2
     exit 1
 fi
 

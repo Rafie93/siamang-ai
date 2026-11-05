@@ -1,0 +1,36 @@
+# Quick start configuration for local models: every agent uses one Ollama model.
+# Copy it to siamang.toml, which stays out of Git, and set provider_model to a tag from `ollama list`.
+# Agents can each use a different model; the web interface can change them under Settings.
+# Secrets never go here: authentication and the seal key come from the environment (docs/HTTP_API.md).
+
+[storage]
+path = "data/siamang.db"
+
+[providers.local]
+type = "ollama"
+base_url = "http://127.0.0.1:11434"
+timeout_secs = 600
+
+[models.engineering]
+provider = "local"
+provider_model = "qwen3:4b-instruct"
+capabilities = ["text_generation", "structured_output"]
+priority = 10
+
+[agents.lead]
+model = "engineering"
+
+[agents.planner]
+model = "engineering"
+
+[agents.analyst]
+model = "engineering"
+
+[agents.programmer]
+model = "engineering"
+
+[agents.qa]
+model = "engineering"
+
+[agents.reviewer]
+model = "engineering"

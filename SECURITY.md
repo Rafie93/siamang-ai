@@ -19,6 +19,17 @@ Know these limits before running it:
 - Treat repository content and model output as untrusted. Report any path where they can
   act as instructions or reach your credentials.
 
+## Web interface
+
+The interface in `web/` binds to `127.0.0.1` and has no login system either. **Do not expose it to a network.**
+
+- The browser never holds a backend token. A local gateway (`web/scripts/local.mjs`) creates a random token for each run and attaches it on the server side.
+- The gateway requires a session cookie (`HttpOnly`, `SameSite=Strict`), a CSRF token and a matching origin and host for writes, and forwards only an allowlist of routes (`web/scripts/gateway.mjs`).
+- A strict Content Security Policy blocks inline and third-party scripts.
+- Model output is rendered as text. Mermaid diagrams written by a model are drawn in strict mode, which sanitizes the SVG and drops click handlers.
+- Approval, evidence and permissions are enforced by the backend. A disabled button is a convenience, not access control.
+- Local data, including the database and the evidence seal key, lives in `~/.siamang/web`, outside the repository. Keep it private.
+
 ## Supported versions
 
 Only the latest commit on `main` receives security fixes.
@@ -34,3 +45,6 @@ Useful reports include:
 - Pushing outside `siamang/*`, or writing outside a managed clone.
 - Leaking credentials, tokens, or the seal key.
 - Prompt injection that changes what Siamang does rather than only what a model writes.
+- Reaching a backend route the web gateway should refuse, or writing without a valid session and CSRF token.
+- Running script through model output, a document, or a Mermaid diagram in the web interface.
+- The web interface showing work, a pass or an approval that the backend did not report.

@@ -10,6 +10,8 @@ Mulai dari sini sesuai kebutuhan Anda.
 | Melihat urutan pekerjaan | [PHASE_ROADMAP.md](PHASE_ROADMAP.md) |
 | Memahami struktur sistem dan keputusan desain | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Memakai atau mengintegrasikan API | [HTTP_API.md](HTTP_API.md) |
+| Memahami antarmuka web di folder `web/` | [WEB.md](WEB.md), [WEB_CONTRACT.md](WEB_CONTRACT.md) |
+| Mencari konfigurasi, perintah CLI, tim agen, dan perilaku pada pekerjaan besar | [REFERENCE.md](REFERENCE.md) |
 | Memberi panduan kepada agen AI yang bekerja dengan Siamang | [SKILL.md](SKILL.md) |
 
 ## Antarmuka

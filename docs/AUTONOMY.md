@@ -125,4 +125,4 @@ yang menyetujui, dan tidak lagi mengatasnamakan operator untuk keputusan kebijak
 - Level berlaku untuk semua proyek, belum per proyek.
 - Run terputus dan batas langganan model masih menunggu tombol Lanjutkan dari pemilik, walaupun itu bukan keputusan.
 - `/v0/tasks/{id}/work-division` tidak melewati Lead, karena dipicu pemilik sendiri di gerbang desain.
-- Virtual Office belum menampilkan catatan keputusan dan belum punya label untuk fase baru `deciding`. Ia menampilkan nama fasenya apa adanya.
+- Antarmuka web belum menampilkan catatan keputusan dan belum punya label untuk fase baru `deciding`. Ia menampilkan nama fasenya apa adanya.

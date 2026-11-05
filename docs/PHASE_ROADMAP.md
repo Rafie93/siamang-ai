@@ -24,7 +24,7 @@ Tujuan akhir, prinsip, dan status komponen ada di [VISION.md](VISION.md).
 | 21 | Dokumen agen, proyek GitHub, gerbang desain, paket paralel | Selesai |
 | 22 | Uji pada proyek nyata | Berjalan; paket paralel belum pernah dipakai pada task nyata |
 | 23 | Event System (WebSocket/SSE) | Belum |
-| 24 | Virtual Office | Berjalan, repo terpisah `siamang-virtual-office` |
+| 24 | Antarmuka web | Berjalan, di folder `web/` |
 | **25** | **Execution Sandbox** | Selesai di kode; belum diuji dengan container nyata |
 | **26** | **Verification Engine** | Sebagian: test/build di sandbox sudah menentukan lulus; pencocokan acceptance criteria belum |
 | **27** | **Tool Executor** | Selesai di kode dan tersambung ke Programmer (`sandbox.tools`); belum diuji dengan container nyata |
@@ -577,7 +577,7 @@ Masih terbuka:
 
 ## Phase 20 HTTP API and truthful proposal runtime
 
-The user authorized backend work before Virtual Office VO-02. Implemented:
+The user authorized backend work before the web interface was built. Implemented:
 optional FastAPI transport, scoped bearer authentication, strict/idempotent task
 submission, explicit single-worker proposal scheduling, persistent execution
 phase/heartbeat, interrupted recovery without automatic re-execution, sealed
@@ -586,7 +586,7 @@ Core lifecycle v0.2/schema v3 stay intact; API supplemental schema is v1.
 Metadata deep-freeze and the public ApprovalService policy reference are hardened.
 Ollama generation is available through the existing model layer; echo is refused
 by the HTTP engineering runtime. No patch apply/execution, WebSocket, SSE,
-Virtual Office frontend, commit, push, or deployment was added.
+web interface, commit, push, or deployment was added.
 
 See HTTP_API.md.
 
@@ -660,7 +660,7 @@ Dibangun: `_work` kini loop di atas `_attempt`, sehingga run yang lolos gerbang 
 pada batas keamanan semuanya tertangkap. Kriteria selesai dipenuhi pada model, mesin container, dan API GitHub tiruan. Bukti
 dengan yang nyata menunggu Phase 32.5.
 
-Tidak dibangun: level per proyek, melanjutkan sendiri run yang terputus atau terkena batas langganan, dan tampilan di Virtual Office.
+Tidak dibangun: level per proyek, melanjutkan sendiri run yang terputus atau terkena batas langganan, dan tampilan di antarmuka web.
 
 ## Pemecahan pekerjaan besar
 
@@ -696,7 +696,7 @@ Batas yang jujur:
 - Belahan paket memiliki file yang sudah ada. File baru yang langsung berada di folder induknya akan ditolak.
 - Retry memulai ulang semua paket dari `pending`, termasuk yang sudah lulus di run sebelumnya, dan desain perlu disetujui lagi.
 - `execution-events` mengembalikan event terlama lebih dulu. Klien harus memakai `after` agar task yang sering diulang tetap
-  terbaca sampai event terbaru. Virtual Office belum melakukannya.
+  terbaca sampai event terbaru. Antarmuka web belum melakukannya.
 
 ## Phase 32.5: Benchmark kesiapan rilis
 

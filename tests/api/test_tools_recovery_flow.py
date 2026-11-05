@@ -243,7 +243,7 @@ def test_the_operators_configuration_turns_both_on_and_off(tmp_path):
         load_config(path, env={})
 
 
-# --- what the Virtual Office can read ------------------------------------------------------------------
+# --- what the web interface can read ------------------------------------------------------------------
 
 
 def test_the_api_exposes_verification_recovery_sandbox_and_the_new_phases(tmp_path):

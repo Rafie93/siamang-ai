@@ -22,7 +22,7 @@ Dokumen ini adalah ringkasan. Detail tiap komponen ada di dokumen masing-masing
 
 ```mermaid
 flowchart TD
-  U[Pemilik] --> V[Antarmuka web: siamang-virtual-office]
+  U[Pemilik] --> V[Antarmuka web: web/]
   U --> CLI[CLI]
   V -->|gateway lokal| API[HTTP API]
   CLI --> CORE

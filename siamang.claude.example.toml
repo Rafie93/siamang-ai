@@ -1,0 +1,34 @@
+# Quick start configuration: every agent uses your logged-in `claude` CLI (personal use).
+# Copy it to siamang.toml, which stays out of Git. Agents can each use a different model:
+# see siamang.example.toml for every option, and siamang.ollama.example.toml for local models.
+
+[storage]
+path = "data/siamang.db"
+
+[providers.claude]
+type = "claude_cli"
+timeout_secs = 600
+
+[models.claude-sonnet]
+provider = "claude"
+provider_model = "sonnet"
+capabilities = ["text_generation", "structured_output"]
+priority = 10
+
+[agents.lead]
+model = "claude-sonnet"
+
+[agents.planner]
+model = "claude-sonnet"
+
+[agents.analyst]
+model = "claude-sonnet"
+
+[agents.programmer]
+model = "claude-sonnet"
+
+[agents.qa]
+model = "claude-sonnet"
+
+[agents.reviewer]
+model = "claude-sonnet"

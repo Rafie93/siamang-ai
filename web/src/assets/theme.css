@@ -1,0 +1,61 @@
+/* Design tokens. Every color in the app comes from here, so a theme is one block of values. */
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --color-bg: #f7f8f7;
+  --color-surface: #ffffff;
+  --color-sidebar: #fafbfa;
+  --color-text: #1f2a25;
+  --color-text-2: #55655d;
+  --color-text-3: #66756d;
+  --color-border: #e5e9e6;
+  --color-hover: #f1f3f2;
+  --color-subtle: #f4f6f5;
+
+  --color-primary: #1b7f52;
+  --color-primary-hover: #176b45;
+  --color-on-primary: #ffffff;
+  --color-primary-soft: #e6f3ed;
+
+  --color-success: #157347;
+  --color-success-soft: #e4f4ea;
+  --color-info: #0b6f8a;
+  --color-info-soft: #e2f3f7;
+  --color-warning: #8a5208;
+  --color-warning-soft: #fdf1dc;
+  --color-error: #b92a30;
+  --color-error-soft: #fcebeb;
+
+  --shadow-sm: 0 1px 2px rgb(16 32 24 / 5%);
+  --shadow-lg: 0 12px 40px rgb(16 32 24 / 18%);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #141a17;
+  --color-surface: #1b2320;
+  --color-sidebar: #171e1b;
+  --color-text: #e4ece8;
+  --color-text-2: #a9b8b0;
+  --color-text-3: #8d9c94;
+  --color-border: #2c3732;
+  --color-hover: #242e2a;
+  --color-subtle: #212a26;
+
+  --color-primary: #3dba84;
+  --color-primary-hover: #52c895;
+  --color-on-primary: #0b1f16;
+  --color-primary-soft: #1f3a2e;
+
+  --color-success: #5fd196;
+  --color-success-soft: #1d3628;
+  --color-info: #62c8e0;
+  --color-info-soft: #17343c;
+  --color-warning: #f0b860;
+  --color-warning-soft: #3a2d16;
+  --color-error: #f28b8e;
+  --color-error-soft: #3d2022;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow-lg: 0 12px 40px rgb(0 0 0 / 50%);
+}

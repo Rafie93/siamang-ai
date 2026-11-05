@@ -113,7 +113,7 @@ Anything hosted or shared needs an API-key adapter instead.
 ## 3a. Choosing models (`siamang.toml`)
 
 `siamang.toml` (not committed; template in `siamang.example.toml`) is the one file
-for backends and models. `scripts/run-local.sh` and the Virtual Office both load
+for backends and models. `scripts/run-local.sh` and the web interface both load
 it. `[agents.<agent>] model = "<model id>"` selects the model for lead, planner,
 analyst, programmer, qa, or reviewer; change that line and restart to switch
 between Claude and Ollama. Only the chosen model is registered for that agent, so

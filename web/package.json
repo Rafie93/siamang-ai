@@ -1,0 +1,41 @@
+{
+  "name": "siamang-web",
+  "private": true,
+  "version": "0.3.0",
+  "description": "Local web interface for Siamang: a 3D office for watching and directing the AI engineering team.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rafie93/siamang-ai.git",
+    "directory": "web"
+  },
+  "scripts": {
+    "dev": "node scripts/local.mjs",
+    "build": "vite build",
+    "start": "node scripts/local.mjs --production",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "format": "prettier --write src scripts tests"
+  },
+  "dependencies": {
+    "@lucide/vue": "1.68.0",
+    "mermaid": "12.2.0",
+    "pinia": "3.0.2",
+    "three": "^0.180.0",
+    "vue": "3.5.44",
+    "vue-router": "4.5.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@vitejs/plugin-vue": "^6.0.0",
+    "@vue/test-utils": "2.4.6",
+    "jsdom": "^26.1.0",
+    "prettier": "3.6.2",
+    "vite": "^7.1.0",
+    "vitest": "^4.1.11"
+  }
+}

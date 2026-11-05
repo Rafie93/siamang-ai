@@ -25,7 +25,7 @@ ada pada bukti:
 | Bukti bisa diperiksa ulang | Hasil disegel dan dihitung ulang, bukan sekadar dicatat |
 | Otonomi lewat kebijakan | Aksi otomatis tercatat seperti keputusan manusia dan bisa diaudit |
 | Berdiri sendiri | Berjalan tanpa control plane eksternal |
-| Bisa dipantau pemilik | Dokumen per agen dan Virtual Office, tanpa harus membaca log |
+| Bisa dipantau pemilik | Dokumen per agen dan antarmuka web, tanpa harus membaca log |
 
 ### Aturan memakai slogan
 
