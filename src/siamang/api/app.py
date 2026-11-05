@@ -9,7 +9,7 @@ from typing import Literal
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,6 +29,7 @@ from . import model_settings
 from .runtime import Runtime, RuntimeRefusal
 from .settings import APISettings
 from .store import RunStore, now
+from .stream import follow
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -200,7 +201,18 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
     @app.get('/v0/health')
     async def health(principal=Depends(permission('read')), db=Depends(database)):
         return {'status': 'healthy' if not db.check() else 'unhealthy', 'version': __version__,
-                'contract_version': '0.7', 'core_schema': 3, 'api_schema': 6, 'observed_at': now()}
+                'contract_version': '0.8', 'core_schema': 3, 'api_schema': 7, 'observed_at': now()}
+
+    @app.get('/v0/stream')
+    async def stream(request: Request, after: int | None = Query(None, ge=0), principal=Depends(permission('read'))):
+        """Server-Sent Events for this principal's projects. ``Last-Event-ID``, sent on a browser's reconnect, wins over ``after``."""
+        hub = runtime.hub
+        if hub is None or hub.full:
+            raise RuntimeRefusal('stream_unavailable', 503)
+        last = request.headers.get('last-event-id', '')
+        cursor = int(last) if last.isascii() and last.isdigit() and len(last) <= 18 else after
+        return StreamingResponse(follow(hub, principal, cursor, public), media_type='text/event-stream',
+                                 headers={'X-Accel-Buffering': 'no'})
 
     @app.get('/v0/capabilities')
     async def capabilities(principal=Depends(permission('read'))):
@@ -209,7 +221,7 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
             configured = True
         except RuntimeRefusal:
             configured = False
-        return {'transport': 'http', 'updates': 'polling', 'streaming': False, 'proposal_only': True,
+        return {'transport': 'http', 'updates': 'sse', 'streaming': True, 'proposal_only': True,
                 'patch_application': False, 'publishing': 'merge_by_policy' if runtime.autonomy().level == 3 else 'pull_request_only', 'model_configured': configured, 'permissions': sorted(principal.permissions),
                 'agent_models': runtime.assignments(),
                 'execution': runtime.execution_features(),
@@ -516,7 +528,7 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
                          principal=Depends(permission('read')), db=Depends(database)):
         scoped_task(db, task_id, principal)
         items = RunStore(db).events(task_id, after, limit)
-        return {'items': items, 'next_after': items[-1]['position'] if items else after}
+        return {'items': public(items), 'next_after': items[-1]['position'] if items else after}
 
     @app.post('/v0/tasks/{task_id}/run', status_code=202)
     async def run(task_id: str, principal=Depends(permission('run')), db=Depends(database)):

@@ -949,7 +949,8 @@ details[open] > .collapse-head .collapse-chevron {
 }
 
 @media (max-width: 640px) {
-  .topbar-crumb {
+  .topbar-crumb,
+  .topbar-updates {
     display: none;
   }
 }

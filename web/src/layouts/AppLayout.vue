@@ -25,6 +25,11 @@ const connection = computed(() => {
     ? { tone: 'success', text: 'Backend tersambung' }
     : { tone: 'error', text: 'Backend tidak tersedia' }
 })
+const updates = computed(() =>
+  office.streaming
+    ? { text: 'Live', title: 'Perubahan dari backend tampil saat terjadi' }
+    : { text: 'Polling', title: 'Tanpa stream: halaman menanyakan perubahan secara berkala' },
+)
 
 watch(
   () => route.fullPath,
@@ -74,6 +79,9 @@ watch(
       >
       <span class="topbar-spacer" />
       <AppTag :tone="connection.tone">{{ connection.text }}</AppTag>
+      <AppTag v-if="office.connected" class="topbar-updates" :title="updates.title">{{
+        updates.text
+      }}</AppTag>
       <button
         type="button"
         class="icon-btn"

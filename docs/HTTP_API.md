@@ -21,7 +21,7 @@ missing credentials or a seal key fail closed, rather than starting anonymously.
 
 `SIAMANG_CONFIG` selects the usual TOML config. `SIAMANG_STORAGE_PATH` overrides
 the database path. The API adds versioned supplemental tables to the core SQLite
-database: `api_schema` (v6), `api_autonomy_decisions`, `api_runs`, append-only `api_run_events`, `api_features`, `api_task_features`, `api_documents`, and `api_design_decisions`. Core
+database: `api_schema` (v7), `api_autonomy_decisions`, `api_runs`, append-only `api_run_events`, `api_features`, `api_task_features`, `api_documents`, `api_design_decisions`, and `api_changes` (see [Event stream](#event-stream)). Core
 schema remains v3 and lifecycle contract remains v0.2. Back up the database
 before first use on an existing installation. No user database was migrated as
 part of development or validation.
@@ -321,6 +321,7 @@ started model call may finish before the worker stops; its proposal is discarded
 | GET | `/v0/settings/models` | read; each agent's model and what can be chosen: configured models plus the tags Ollama has installed, with `cloud` true when the model is not on this machine |
 | POST | `/v0/settings/models` | configure and an unrestricted `*` scope; body `agent`, `provider`, `provider_model`. Only an offered, available model is accepted. Edits the `SIAMANG_CONFIG` file in place, adding a `[models.*]` table for a new Ollama tag; the agent's next model call uses it, no restart |
 | GET | `/v0/openapi.json` | read; generated OpenAPI contract, bearer security scheme |
+| GET | `/v0/stream?after=0` | read; Server-Sent Events for the projects in scope, see [Event stream](#event-stream) |
 | GET | `/v0/projects` | read; scoped registered projects, local root paths withheld |
 | GET | `/v0/projects/{project_id}` | read; scoped project |
 | GET | `/v0/tasks?project_id=...&status=...&limit=100&offset=0` | read; lifecycle + execution snapshots |
@@ -336,12 +337,52 @@ started model call may finish before the worker stops; its proposal is discarded
 | GET | `/v0/approvals?project_id=...` | read; waiting proposals with complete evidence and eligibility |
 | POST | `/v0/approvals/{run_id}` | approve; explicit approve/reject through ApprovalService |
 
-List limits are 1–100. Polling/refresh is supported; no SSE/WebSocket or fake
-progress percentage is advertised. Lifecycle events use per-task `seq`; execution
-events have their own `position` cursor. Consumers must not merge these cursors.
+List limits are 1–100. No fake progress percentage is advertised. Lifecycle events
+use per-task `seq`; execution events have their own `position` cursor; the event
+stream has a third. Consumers must not merge these cursors.
 Reports are sanitized display data; their original sealed artifacts remain
 server-side. Missing artefacts are null/absent, not invented. Static QA/review
 `pass` does not claim runtime code correctness.
+
+## Event stream
+
+`GET /v0/stream` is Server-Sent Events: one way, over the same bearer token and `read` permission as every other route.
+Commands stay on HTTP. The stream says what committed and in what order. It does not replace the routes: a client that
+misses it entirely, or never opens it, can still read everything by polling.
+
+```
+curl -N -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8765/v0/stream
+```
+
+| Event | `id` | Data | Meaning |
+|---|---|---|---|
+| `ready` | yes | `cursor`, `replay` | First on every connection. `replay: false` means changes may have been missed: reload. It can come again later if the reader falls behind what is kept |
+| `lifecycle` | yes | `project_id`, `task_id`, `event` | A contract envelope, the same one `/tasks/{id}/events` returns |
+| `execution` | yes | `project_id`, `task_id`, `event` | A stage transition, the same row `/tasks/{id}/execution-events` returns |
+| `changed` | yes | `project_id`, `task_id` or null, `parts` | Something without an event of its own changed. Reload it from its route |
+| `heartbeat` | no | `run_id`, `task_id`, `project_id`, `heartbeat_at` | The worker is alive. Only when the value changes, about every 3 seconds per running run |
+| `ping` | yes | `at` | Nothing else to say. Every 10 seconds, so a client can tell a quiet stream from a dead one |
+
+`parts` of `changed`: `task` (`/tasks/{id}`: packages, design parts, branch, CI), `documents`, `messages` (with no task, the project's
+intake), `reports` (with `/approvals`), `autonomy`, `drafts`, `project` (`/portfolio`, `/projects`, `/projects/{id}/intake`). Ignore event
+types and parts you do not know.
+
+**Resuming.** A browser's `EventSource` reconnects by itself and sends `Last-Event-ID`; other clients can send that header or
+`?after=`, and the header wins. Everything after that position is replayed in commit order, with no gap and no repeat. With no
+cursor, the stream starts at the newest change. A cursor the server cannot honor (older than what is kept, or ahead of the log)
+gets `replay: false`, then follows from the newest change.
+
+**Truthfulness.** SQL triggers append each change to `api_changes` inside the writer's own transaction, so a rolled-back write
+is never announced, no call site can forget to announce one, and writes from the CLI are included. Task state and run phase have no
+trigger of their own because they always commit with an event. The log keeps about the last 10,000 changes and prunes itself.
+
+**Scope.** Each frame goes only to a principal allowed that project. A change whose project cannot be determined is withheld
+from everyone, including a `*` principal. Frames pass through the same sanitizer as the routes.
+
+**Limits.** At most 8 streams at once; beyond that, and during shutdown, the route answers 503 `stream_unavailable`.
+A slow reader falls behind in the database, not in memory. Model tokens are not streamed. A change arrives within about 0.2 seconds of its
+commit, plus a reader's own reload.
+
 
 Task submission body (strict, extra fields refused):
 

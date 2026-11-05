@@ -1,4 +1,4 @@
-"""API schema v6, additive to core schema v3. All state changes join core transactions."""
+"""API schema v7, additive to core schema v3. All state changes join core transactions."""
 import hashlib
 import hmac
 import json
@@ -13,6 +13,35 @@ def now():
     return datetime.now(UTC).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
 
+_PROJECT_OF_TASK = '(SELECT project_id FROM tasks WHERE task_id=NEW.task_id)'
+_TASK_OF_RUN = '(SELECT task_id FROM api_runs WHERE run_id=NEW.run_id)'
+_PROJECT_OF_RUN = ('(SELECT t.project_id FROM api_runs r JOIN tasks t ON t.task_id=r.task_id '
+                   'WHERE r.run_id=NEW.run_id)')
+_WRITES = ('INSERT', 'UPDATE')
+# Every write a reader may need to see: (table, kind, project, task, ref, trigger events). A trigger cannot be forgotten
+# at a call site, joins the writer's transaction so a rollback leaves no row, and sees writes from the CLI too.
+# A task's state and its run's phase always commit with an event, so ``tasks`` and most of ``api_runs`` need no row here.
+# A heartbeat names neither bundle, report, nor decision, so it adds nothing: it is carried by the hub instead.
+WATCHED_WRITES = (
+    ('events', 'lifecycle', _PROJECT_OF_TASK, 'NEW.task_id', 'NEW.event_id', ('INSERT',)),
+    ('api_run_events', 'execution', _PROJECT_OF_TASK, 'NEW.task_id', 'NEW.position', ('INSERT',)),
+    ('api_runs', 'reports', _PROJECT_OF_TASK, 'NEW.task_id', 'NULL', ('UPDATE OF bundle, report, decision',)),
+    ('api_documents', 'documents', _PROJECT_OF_TASK, 'NEW.task_id', 'NULL', ('INSERT',)),
+    ('api_design_parts', 'task', _PROJECT_OF_RUN, _TASK_OF_RUN, 'NULL', _WRITES),
+    ('api_work_packages', 'task', _PROJECT_OF_RUN, _TASK_OF_RUN, 'NULL', _WRITES),
+    ('api_task_branches', 'task', 'NEW.project_id', 'NEW.task_id', 'NULL', _WRITES),
+    ('api_task_ci', 'task', _PROJECT_OF_TASK, 'NEW.task_id', 'NULL', ('INSERT',)),  # written with INSERT OR REPLACE
+    ('api_autonomy_decisions', 'autonomy', _PROJECT_OF_TASK, 'NEW.task_id', 'NULL', ('INSERT',)),
+    ('api_messages', 'messages', 'NEW.project_id', 'NEW.task_id', 'NULL', ('INSERT',)),  # no task: the project's intake
+    ('api_task_drafts', 'drafts', 'NEW.project_id', 'NULL', 'NULL', _WRITES),
+    ('api_project_repos', 'project', 'NEW.project_id', 'NULL', 'NULL', _WRITES),
+    ('api_project_specs', 'project', 'NEW.project_id', 'NULL', 'NULL', _WRITES),
+    ('api_features', 'project', 'NEW.project_id', 'NULL', 'NULL', ('INSERT',)),
+    ('projects', 'project', 'NEW.project_id', 'NULL', 'NULL', _WRITES),
+)
+CHANGE_RETENTION = 10_000  # enough to resume after a dropped connection; further behind, a reader reloads instead
+
+
 class RunStore:
     def __init__(self, db):
         self.db = db
@@ -21,9 +50,9 @@ class RunStore:
         with self.db.transaction() as conn:
             conn.execute('CREATE TABLE IF NOT EXISTS api_schema (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL) STRICT')
             conn.execute('INSERT OR IGNORE INTO api_schema VALUES (1,1)')
-            if conn.execute('SELECT version FROM api_schema WHERE singleton=1').fetchone()[0] not in (1, 2, 3, 4, 5, 6):
+            if conn.execute('SELECT version FROM api_schema WHERE singleton=1').fetchone()[0] not in (1, 2, 3, 4, 5, 6, 7):
                 raise ValueError('unsupported API schema version')
-            conn.execute('UPDATE api_schema SET version=6 WHERE singleton=1')
+            conn.execute('UPDATE api_schema SET version=7 WHERE singleton=1')
             conn.execute('''CREATE TABLE IF NOT EXISTS api_runs (
                 run_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, state TEXT NOT NULL,
                 phase TEXT NOT NULL, iteration INTEGER, wait_reason TEXT,
@@ -112,6 +141,42 @@ class RunStore:
                 BEFORE DELETE ON api_autonomy_decisions BEGIN SELECT RAISE(ABORT, 'append only'); END''')
             conn.execute('CREATE INDEX IF NOT EXISTS api_project_drafts ON api_task_drafts(project_id, state)')
             conn.execute("UPDATE api_task_drafts SET state='failed', error='interrupted' WHERE state='thinking'")
+            self._install_change_log(conn)
+
+    @staticmethod
+    def _install_change_log(conn):
+        conn.execute('''CREATE TABLE IF NOT EXISTS api_changes (
+            position INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
+            project_id TEXT, task_id TEXT, ref TEXT) STRICT''')
+        conn.execute(f'''CREATE TRIGGER IF NOT EXISTS api_changes_bounded AFTER INSERT ON api_changes
+            WHEN NEW.position % 1000 = 0 BEGIN
+            DELETE FROM api_changes WHERE position <= NEW.position - {CHANGE_RETENTION}; END''')
+        for table, kind, project, task, ref, writes in WATCHED_WRITES:
+            for number, write in enumerate(writes):
+                # Dropped first, so a newer definition replaces the one an earlier version installed.
+                name = f'api_change_{table}_{number}'
+                conn.execute(f'DROP TRIGGER IF EXISTS {name}')
+                conn.execute(f'''CREATE TRIGGER {name} AFTER {write} ON {table} BEGIN
+                    INSERT INTO api_changes(kind,project_id,task_id,ref) VALUES ('{kind}',{project},{task},{ref}); END''')
+
+    def change_bounds(self):
+        """The newest change, and the oldest still kept. Both are 0 until something has been written."""
+        row = self.db.conn.execute('SELECT MAX(position) AS head, MIN(position) AS oldest FROM api_changes').fetchone()
+        return row['head'] or 0, row['oldest'] or 0
+
+    def changes(self, after, limit):
+        return [dict(r) for r in self.db.conn.execute(
+            'SELECT * FROM api_changes WHERE position>? ORDER BY position LIMIT ?', (after, limit)).fetchall()]
+
+    def execution_event(self, position):
+        row = self.db.conn.execute('SELECT * FROM api_run_events WHERE position=?', (position,)).fetchone()
+        return dict(position=row['position'], run_id=row['run_id'], task_id=row['task_id'],
+                    timestamp=row['timestamp'], **json.loads(row['payload'])) if row else None
+
+    def running_heartbeats(self):
+        return [dict(r) for r in self.db.conn.execute(
+            'SELECT r.run_id, r.task_id, t.project_id, r.heartbeat_at FROM api_runs r '
+            "JOIN tasks t ON t.task_id=r.task_id WHERE r.state='running'").fetchall()]
 
     def create(self, task_id):
         run_id, timestamp = new_id('request'), now()

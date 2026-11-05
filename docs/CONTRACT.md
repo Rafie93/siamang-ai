@@ -11,7 +11,7 @@ kontrak dan boleh berubah tanpa memengaruhi klien.
 > **Yang berjalan hari ini:** envelope dan event lifecycle di dokumen ini dipakai
 > untuk penyimpanan dan replay event task. Route HTTP, body request, tahap
 > eksekusi, dan approval yang sebenarnya ada di [HTTP_API.md](HTTP_API.md), yang
-> didahulukan bila ada perbedaan. WebSocket belum tersedia.
+> didahulukan bila ada perbedaan.
 
 ---
 
@@ -31,8 +31,9 @@ kontrak dan boleh berubah tanpa memengaruhi klien.
 
 | Opsi | Status |
 |---|---|
-| HTTP untuk command, polling untuk status | **Berjalan.** Lihat [HTTP_API.md](HTTP_API.md) |
-| WebSocket atau SSE untuk event push | Direncanakan, Phase 23 |
+| HTTP untuk command dan untuk membaca state | **Berjalan.** Lihat [HTTP_API.md](HTTP_API.md) |
+| SSE untuk event push (`GET /v0/stream`) | **Berjalan.** Envelope dikirim utuh sebagai event `lifecycle`. Lihat [Event stream](HTTP_API.md#event-stream) |
+| WebSocket | Tidak dipakai. Perintah sudah lewat HTTP, jadi tidak ada lalu lintas dua arah yang perlu dilayani |
 
 ---
 

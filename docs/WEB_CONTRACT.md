@@ -7,6 +7,7 @@ Sumber: backend Siamang, `src/siamang/api` (`app.py`, `runtime.py`, `store.py`, 
 | GET | `/v0/health` | read; storage health/version and observation timestamp |
 | GET | `/v0/capabilities` | read; truthful model configuration, permissions, supported statuses; `execution` = `{sandbox, tools, recovery}` says what this backend will actually do; `execution_phases` now includes `verifying` and `recovering` |
 | GET | `/v0/openapi.json` | read; generated OpenAPI contract, bearer security scheme |
+| GET | `/v0/stream?after=0` | read; Server-Sent Events. Detail di [HTTP_API.md](HTTP_API.md#event-stream) |
 | GET | `/v0/projects` | read; scoped registered projects, local root paths withheld |
 | GET | `/v0/projects/{project_id}` | read; scoped project |
 | GET | `/v0/tasks?project_id=...&status=...&limit=100&offset=0` | read; lifecycle + execution snapshots |
@@ -47,7 +48,7 @@ Aktivitas tahap hanya divisualisasikan saat snapshot baru, lifecycle running, ex
 
 Waiting perlu wait_reason: approval_required, quality_gate, input_required, worker_interrupted. Jangan menganggap setiap waiting menunggu approval. Finished/completed berarti proposal disetujui; bukan patch diterapkan atau tes runtime kode lulus.
 
-Polling task aktif setiap 3 detik, backoff saat gagal, hentikan ketika view dilepas/terminal, label stale dan waktu observasi. Pisahkan connection state dari task state, jangan membuat persen progress. Polling cepat tetap dapat melewatkan tahap singkat; replay execution-events memberi histori nyata.
+Ikuti `/v0/stream` dan muat ulang yang disebutnya. Bila stream tidak tersedia, polling setiap 3 detik dengan backoff saat gagal. Hentikan keduanya ketika view dilepas, tampilkan label stale dan waktu observasi. Pisahkan connection state dari task state, jangan membuat persen progress. Klien yang tidak lagi polling wajib memakai event `heartbeat` untuk `heartbeat_at`, karena kesegaran dinilai dari nilai itu. Polling cepat tetap dapat melewatkan tahap singkat; replay execution-events memberi histori nyata.
 
 ## Dokumen, proyek, dan gate desain
 

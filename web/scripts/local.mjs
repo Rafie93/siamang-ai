@@ -78,7 +78,8 @@ if (!production) {
   })
 }
 const session = randomBytes(32).toString('hex'),
-  csrf = randomBytes(32).toString('hex')
+  csrf = randomBytes(32).toString('hex'),
+  streams = new Set()
 const server = http.createServer(async (req, res) => {
   res.setHeader(
     'Content-Security-Policy',
@@ -110,7 +111,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(403, { 'Content-Type': 'application/json' }).end('{"error":{"code":"session_required"}}')
       return
     }
-    return proxy(req, res, { backend, token })
+    return proxy(req, res, { backend, token, streams })
   }
   if (vite) {
     vite.middlewares(req, res)
@@ -160,6 +161,7 @@ let closing = false
 async function close() {
   if (closing) return
   closing = true
+  for (const stream of streams) stream.abort() // an open stream would hold the backend's shutdown up
   server.close()
   await vite?.close()
   child.kill('SIGTERM')

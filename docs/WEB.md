@@ -19,7 +19,8 @@ Browser → gateway lokal (`scripts/local.mjs`, session + CSRF, token acak di se
 | 3D | `src/three/director.js` | koreografi: serah-terima, approval, selebrasi, aktivitas santai, reset saat ganti task |
 | 3D | `src/three/navigation.js` | denah, jalur meja→lane→lorong→lane→tujuan, uji tabrakan furnitur |
 | 3D | `src/three/screens.js` | tekstur monitor per peran dan papan pipeline (CanvasTexture) |
-| UI | `src/stores/office.js` | store Pinia: polling, state task/proyek, dan aksi ke backend |
+| UI | `src/stores/office.js` | store Pinia: pemuatan per bagian, state task/proyek, dan aksi ke backend |
+| UI | `src/services/stream.js`, `src/domain/live.js` | koneksi event stream; arti tiap event bagi halaman: bagian yang dimuat ulang, penggabungan riwayat, heartbeat |
 | UI | `src/router/index.js` | daftar halaman, route, dan item sidebar |
 | UI | `src/layouts/`, `src/pages/`, `src/components/` | shell aplikasi, satu halaman per menu, panel tim, log komunikasi, kontrol scene |
 | UI | `src/components/ui/` | komponen kecil di atas elemen native (`<dialog>`, `<select>`, `<label>`), tanpa library UI |
@@ -27,7 +28,21 @@ Browser → gateway lokal (`scripts/local.mjs`, session + CSRF, token acak di se
 
 ## Aliran data
 
-`refresh()` (polling 3 dtk, backoff saat gagal) → `selected` task + `execution-events` → `teamState()` (dihitung ulang tiap detik agar heartbeat kedaluwarsa lokal) → `office.setTeam()` → director.
+Event stream (`/v0/stream`) → `scopesFor()` memilih bagian yang berubah → `load()` memuat ulang bagian itu saja → `selected` task + `execution-events` → `teamState()` (dihitung ulang tiap detik agar heartbeat kedaluwarsa lokal) → `office.setTeam()` → director.
+
+Tahap baru langsung masuk riwayat dari event-nya. Heartbeat langsung memperbarui `execution` tanpa request; tanpa ini, tim tampak "belum terverifikasi" setiap 15 detik karena halaman tidak lagi bertanya. Bila worker benar-benar berhenti, heartbeat berhenti dan label itu muncul dengan benar.
+
+Polling tetap ada sebagai jaring pengaman:
+
+| Keadaan | `refresh()` penuh | Label di bilah atas |
+|---|---|---|
+| Stream terbuka | Tiap 30 detik | Live |
+| Stream terputus, ditolak, atau browser tanpa `EventSource` | Langsung, lalu tiap 3 detik, dengan backoff saat gagal | Polling |
+| Tab tersembunyi | Tiap 30 detik; stream ditutup, karena browser hanya memberi enam koneksi per host | Tidak terlihat |
+
+Stream hanya memberi tahu. Nilai yang ditampilkan selain tahap dan heartbeat tetap berasal dari route HTTP, dengan validasi yang sama. Setiap `ready` memicu `refresh()` penuh, jadi yang terlewat saat koneksi putus ikut termuat.
+
+`loadEvents()` membaca riwayat per halaman sampai habis, dan melanjutkan dari posisi route terakhir, bukan dari event terbaru yang dipegang. Event dari stream bisa saja lebih maju dari yang pernah terbaca lewat route, dan celahnya terisi pada pemuatan berikutnya.
 
 Aturan director:
 - **Bekerja** hanya untuk `team.activeAgent` (fase aktif terverifikasi).

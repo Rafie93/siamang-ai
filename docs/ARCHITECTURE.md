@@ -75,8 +75,10 @@ Test arsitektur menegakkan arah impor antar-lapisan.
 
 ## 5. Komunikasi
 
-* **Klien ke Siamang:** HTTP di `127.0.0.1` dengan bearer token. Status dibaca lewat
-  polling; WebSocket dan SSE belum ada.
+* **Klien ke Siamang:** HTTP di `127.0.0.1` dengan bearer token untuk perintah dan
+  pembacaan state.
+* **Siamang ke klien:** SSE di `GET /v0/stream`, dibaca dari log `api_changes` yang ditulis
+  trigger SQL dalam transaksi penulisnya. Klien tanpa stream tetap bisa memakai polling.
 * **Di dalam Siamang:** bus internal. Event internal **tidak** bocor ke kontrak;
   hanya event kontrak yang disimpan untuk replay.
 

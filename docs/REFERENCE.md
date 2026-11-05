@@ -91,6 +91,7 @@ dan kontrak OpenAPI ada di `GET /v0/openapi.json`.
 | Method | Route | Fungsi |
 |---|---|---|
 | GET | `/v0/health`, `/v0/capabilities` | Kesehatan server, model, dan kemampuan yang aktif |
+| GET | `/v0/stream` | Event stream SSE: perubahan saat terjadi, bisa dilanjutkan setelah koneksi putus |
 | POST | `/v0/projects` | Mendaftarkan dan meng-clone repo GitHub |
 | POST | `/v0/projects/{id}/intake/messages`, `.../intake/approve` | Spesifikasi proyek bersama Lead |
 | POST | `/v0/projects/{id}/drafts`, `.../drafts/{draft}/confirm` | Percakapan sebelum task, lalu memulai task |

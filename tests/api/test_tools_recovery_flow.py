@@ -273,7 +273,7 @@ def test_the_api_exposes_verification_recovery_sandbox_and_the_new_phases(tmp_pa
         project = snapshot(client, task_id)['project_id']
         approval = client.get(f'/v0/approvals?project_id={project}', headers=headers()).json()['items'][0]
         assert approval['verification'] == 'passed' and approval['recovery'] == 'completed'
-        assert client.get('/v0/health', headers=headers()).json()['api_schema'] == 6
+        assert client.get('/v0/health', headers=headers()).json()['api_schema'] == 7
 
 
 def test_a_runtime_without_the_sandbox_says_so(world):

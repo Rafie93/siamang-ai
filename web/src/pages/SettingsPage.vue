@@ -100,7 +100,9 @@ onMounted(load)
           jaringan publik.
         </p>
         <p>Permission backend: {{ office.permissions.join(', ') || 'Belum diketahui' }}</p>
-        <p class="mb-0">Antarmuka web {{ version }} · HTTP /v0 · pembaruan polling</p>
+        <p class="mb-0">
+          Antarmuka web {{ version }} · HTTP /v0 · pembaruan {{ office.streaming ? 'live (SSE)' : 'polling' }}
+        </p>
       </AppCard>
     </div>
     <AppCard title="Model per agen">

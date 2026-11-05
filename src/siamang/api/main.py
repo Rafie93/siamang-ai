@@ -10,7 +10,17 @@ def main(argv=None):
         parser.error('port must be between 1 and 65535')
     import uvicorn
     from .app import create_app
-    uvicorn.run(create_app(), host='127.0.0.1', port=args.port, workers=1, access_log=False)
+    app = create_app()
+
+    class Server(uvicorn.Server):
+        def handle_exit(self, sig, frame):
+            # uvicorn waits for open connections before it shuts the app down, and an event stream never finishes alone.
+            if app.state.runtime.hub:
+                app.state.runtime.hub.end_streams()
+            super().handle_exit(sig, frame)
+
+    Server(uvicorn.Config(app, host='127.0.0.1', port=args.port, workers=1, access_log=False,
+                          timeout_graceful_shutdown=5)).run()
 
 
 if __name__ == '__main__':

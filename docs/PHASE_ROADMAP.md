@@ -20,10 +20,10 @@ Tujuan akhir, prinsip, dan status komponen ada di [VISION.md](VISION.md).
 | 17 | Reviewer | Selesai |
 | 18 | QA → Programmer → QA Loop | Selesai |
 | 19 | Approval System | Selesai |
-| 20 | HTTP API dan proposal runtime | Selesai; WebSocket pindah ke Phase 23 |
+| 20 | HTTP API dan proposal runtime | Selesai |
 | 21 | Dokumen agen, proyek GitHub, gerbang desain, paket paralel | Selesai |
 | 22 | Uji pada proyek nyata | Berjalan; paket paralel belum pernah dipakai pada task nyata |
-| 23 | Event System (WebSocket/SSE) | Belum |
+| 23 | Event System (SSE) | Selesai; WebSocket sengaja tidak dipakai |
 | 24 | Antarmuka web | Berjalan, di folder `web/` |
 | **25** | **Execution Sandbox** | Selesai di kode; belum diuji dengan container nyata |
 | **26** | **Verification Engine** | Sebagian: test/build di sandbox sudah menentukan lulus; pencocokan acceptance criteria belum |
@@ -696,7 +696,55 @@ Batas yang jujur:
 - Belahan paket memiliki file yang sudah ada. File baru yang langsung berada di folder induknya akan ditolak.
 - Retry memulai ulang semua paket dari `pending`, termasuk yang sudah lulus di run sebelumnya, dan desain perlu disetujui lagi.
 - `execution-events` mengembalikan event terlama lebih dulu. Klien harus memakai `after` agar task yang sering diulang tetap
-  terbaca sampai event terbaru. Antarmuka web belum melakukannya.
+  terbaca sampai event terbaru. Antarmuka web melakukannya sejak Phase 23.
+
+## Phase 23: Event System
+
+Detail untuk klien: [Event stream](HTTP_API.md#event-stream). Detail halaman: [WEB.md](WEB.md#aliran-data).
+
+**Masalah.** Halaman mengirim sekitar 12 request tiap 3 detik, sibuk atau tidak, termasuk `quick_check` database dan verifikasi segel
+laporan. Perubahan baru terlihat sampai 3 detik kemudian. `execution-events` dibaca sekali dengan batas 100, jadi task yang sering diulang
+berhenti di tahap lama. `refresh()` yang datang saat load berjalan dibuang.
+
+**Keputusan:**
+
+| Pilihan | Alasan | Yang ditolak |
+|---|---|---|
+| SSE | Arahnya satu: perintah sudah lewat HTTP. Tanpa dependensi baru, dan `Last-Event-ID` sudah memberi replay | WebSocket butuh dependensi server, jalur upgrade di gateway, dan protokol reconnect sendiri |
+| Log `api_changes` yang ditulis trigger | Satu transaksi dengan penulisnya: rollback tidak terkirim, tak ada call site yang bisa lupa, tulisan CLI ikut | `EventBus` hanya sedalam satu proses dan hanya lifecycle. Hook di `RunStore` tidak melihat SQL langsung atau CLI |
+| Setiap stream hanya memegang cursor | Pembaca lambat tertinggal di database, bukan di memori. Melanjutkan dan mengikuti adalah pembacaan yang sama | Antrean per pelanggan butuh batas, kebijakan buang, dan penyangga replay |
+| `PRAGMA data_version` untuk membangunkan | Hanya berubah saat koneksi lain commit, termasuk proses lain, dan tidak berubah saat rollback | Memicu dari kode butuh sambungan ke tiap worker |
+| Polling tetap ada | Stream mempercepat, bukan menjadi satu-satunya jalan ke kebenaran | Mengandalkan stream saja membuat satu bug menjadi data basi tanpa tanda |
+
+**Yang terbukti perlu ditangani:**
+
+- Satu stream terbuka membuat uvicorn menunggu selamanya saat SIGTERM, jadi `runtime.close()` tidak pernah jalan. `main.py` kini mengakhiri
+  stream saat sinyal tiba, dengan batas 5 detik sebagai cadangan.
+- Tanpa polling, `heartbeat_at` di halaman menua dan tim tampak tidak aktif setelah 15 detik. Heartbeat kini dikirim lewat stream.
+- Browser membatasi enam koneksi per host, jadi tab tersembunyi melepas stream-nya.
+
+**Hasil ukur**, memakai backend, gateway, dan Chromium sungguhan dengan model tiruan yang lambat. Kolom "Polling" untuk request adalah hasil
+ukur mode cadangan, yang jadwalnya sama dengan sebelum Phase 23. Untuk latensi, kolom itu adalah batas dari intervalnya, bukan hasil ukur.
+
+| Ukuran | Polling | Stream |
+|---|---|---|
+| Request saat halaman diam, per 15 detik | 60 | 0 |
+| Task dibuat dari luar halaman sampai tampil | sampai 3 detik | 197–315 ms |
+| Tahap baru sampai tampil | sampai 3 detik | 294–788 ms |
+| Backend berhenti sampai halaman mengatakannya | sampai 3 detik | 172 ms |
+
+SIGTERM dengan stream browser terbuka selesai dalam 167 ms langsung ke backend, dan 193 ms lewat gateway.
+
+Test: 26 test stream Python di atas uvicorn sungguhan, test gateway di atas soket sungguhan, test store, dan spec Playwright. 42 mutasi pada
+batas keamanan dan keandalan semuanya tertangkap.
+
+**Batas yang jujur:**
+
+- `api_work_packages` tidak dicatat saat baris dihapus tanpa pengganti. Pembagian ulang selalu menulis baris baru, dan pemuatan 30 detik
+  menutup sisanya.
+- Baris `api_changes` dihapus setelah sekitar 10.000 perubahan. Pembaca yang tertinggal lebih jauh diminta memuat ulang (`replay: false`).
+- Belum ada tampilan untuk `autonomy`: event-nya terkirim, dan halaman mengabaikannya sampai Phase 29 punya tampilan.
+- Belum diuji dengan model nyata; bukti itu ikut Phase 32.5.
 
 ## Phase 32.5: Benchmark kesiapan rilis
 

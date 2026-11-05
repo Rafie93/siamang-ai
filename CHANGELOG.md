@@ -13,6 +13,8 @@ Notable changes to Siamang. No version has been tagged as a GitHub release yet.
 - Work division: design documents and work packages run in parallel within a task, with bounded retries, and the record shows what really ran at the same time.
 - Automatic CI repair on an approved, open pull request, a limited number of times.
 - Web interface in `web/`, in the same repository as the backend, with one version for both.
+- Event stream: `GET /v0/stream` sends what changed as Server-Sent Events, resumable after a dropped connection and scoped to the projects a token may read. API schema 7 adds the `api_changes` log, filled by SQL triggers inside each write's own transaction.
+- The web interface follows that stream instead of polling. An idle page now sends no requests, and changes appear in under a second. It falls back to polling when the stream is unavailable, and the top bar says which it is using.
 - `scripts/init-credentials.py`, `siamang.claude.example.toml` and `siamang.ollama.example.toml`, which replace the inline setup in the quick start. The Ollama template replaces `siamang.api.example.toml` and now gives every agent a model.
 
 ### Changed
@@ -24,6 +26,9 @@ Notable changes to Siamang. No version has been tagged as a GitHub release yet.
 
 ### Fixed
 
+- A task with more than 100 execution events no longer stops at an old stage in the web interface: it now reads the whole history, a page at a time.
+- A refresh asked for during another load, such as right after an action, is no longer dropped.
+- `execution-events` now removes machine paths and credentials from its values, as the other routes do.
 - A Programmer change labelled `create` on an existing file it had read no longer fails the task: it becomes a modification, with a warning. A file it never saw is still refused, and a failed task now names the rejected path.
 - The **Bagi ulang** button always failed, because the gateway did not allow `POST /tasks/{id}/work-division`.
 

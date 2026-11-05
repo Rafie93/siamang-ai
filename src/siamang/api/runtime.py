@@ -72,6 +72,7 @@ from .codec import decode, encode
 from . import autonomy, ci_repair, recover, verify
 from .parallel import ONE_ROUND, QA_POLICY, INTEGRATION_REVIEW, INPUT_DESIGN_BYTES, SPEC_BYTES, Merged, PackageRun, PackageStopped, commit_groups, merge_patches
 from .store import RunStore, now
+from .stream import ChangeHub
 
 
 class RuntimeRefusal(Exception):
@@ -186,6 +187,7 @@ class Runtime:
         self._repos = repos or RepoClient()
         self._background = None
         self._busy = threading.Lock()
+        self.hub = None
         self._pool = None
         self._lock_file = None
         self._closing = False
@@ -306,6 +308,7 @@ class Runtime:
             self._ci_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='siamang-ci')
             self._ci_wake.clear()
             self._closing = False
+            self.hub = ChangeHub(self.settings.database)
             with Database(self.settings.database) as db:
                 for task_id in RunStore(db).watching_ci():  # a restart must not lose a build that is still running
                     self._ci_pool.submit(self._watch_ci, task_id)
@@ -316,6 +319,9 @@ class Runtime:
     def close(self):
         self._closing = True
         self._ci_wake.set()
+        if self.hub:
+            self.hub.stop()
+            self.hub = None
         if self._background:
             self._background.shutdown(wait=True, cancel_futures=True)
             self._background = None

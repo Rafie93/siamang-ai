@@ -8,9 +8,14 @@ import { demoSnapshot } from '@/domain/demo.js'
 import { groupDocuments, documentAgentFor, modelLabel } from '@/domain/documents.js'
 import { errorText } from '@/domain/labels.js'
 import { agentDetail, attention, bubbleLines, stageFallback, withPortfolio } from '@/domain/office.js'
+import { ALL_SCOPES, knownEvents, mergeEvents, scopesFor, withHeartbeat } from '@/domain/live.js'
+import { openStream } from '@/services/stream.js'
 
 const API_CONTRACT = 0.6 // what this page needs: a backend started before an upgrade refuses its new actions
 const SELECTION = 'siamang.selection'
+const POLL_MS = 3000
+const SAFETY_POLL_MS = 30000 // with the stream open, or nobody looking; the stream is not trusted to be the only way
+const FRAME_DELAY_MS = 120 // a burst of events becomes one reload
 function remembered() {
   try {
     return JSON.parse(localStorage.getItem(SELECTION)) || {}
@@ -58,6 +63,7 @@ export const useOfficeStore = defineStore('office', () => {
     feedCurrent = ref(null),
     stagePin = ref(''),
     live = ref(null),
+    streaming = ref(false),
     agentPopup = ref(''),
     bubbleAgent = ref('')
   const taskError = ref(''),
@@ -417,9 +423,14 @@ export const useOfficeStore = defineStore('office', () => {
   }
   let timer,
     disposed = false,
-    refreshing = false,
     failures = 0,
-    submission = null
+    submission = null,
+    queued = null,
+    running = null,
+    stream = null,
+    frameTimer,
+    frameScopes = new Set()
+  const eventCursors = new Map() // how far the route has been read for each task; stream events never move this
   const status = computed(() => {
     void clock.value
     return visualStatus(selected.value, connected.value)
@@ -429,94 +440,218 @@ export const useOfficeStore = defineStore('office', () => {
   const project = computed(() => projects.value.find(p => p.project_id === projectId.value))
   const active = computed(() => tasks.value.filter(t => t.status === 'running').length)
 
-  async function refresh() {
-    if (refreshing || disposed) return
-    refreshing = true
+  function scheduleRefresh() {
+    clearTimeout(timer)
+    if (disposed) return
+    const steady = streaming.value || document.hidden ? SAFETY_POLL_MS : POLL_MS
+    timer = setTimeout(refresh, failures ? Math.min(POLL_MS * 2 ** failures, SAFETY_POLL_MS) : steady)
+  }
+  /**
+   * Every event in a task's history. The route gives the oldest first, a page at a time. It reads on from where the route
+   * was last read, not from the newest event held: an event the stream delivered may sit past one it did not.
+   */
+  async function loadEvents(taskId, held) {
+    const known = knownEvents(held, taskId)
+    const fresh = []
+    let after = known.length ? eventCursors.get(taskId) || 0 : 0
+    for (;;) {
+      const page = await request(`/tasks/${taskId}/execution-events?limit=100&after=${after}`)
+      fresh.push(...items(page))
+      after = page.next_after
+      if (page.items.length < 100) break
+    }
+    eventCursors.set(taskId, after)
+    return mergeEvents(known, fresh)
+  }
+  async function loadScopes(scopes) {
+    const has = name => scopes.has(name)
+    const full = ALL_SCOPES.every(has)
+    let failed = false
     try {
       const [health, caps, ps, pf, board] = await Promise.all([
-        request('/health'),
-        request('/capabilities'),
-        request('/projects'),
-        request('/portfolio'),
-        request('/office').catch(() => ({ items: [], current: null })),
+        has('system') ? request('/health') : null,
+        has('system') ? request('/capabilities') : null,
+        has('board') ? request('/projects') : null,
+        has('board') ? request('/portfolio') : null,
+        has('board') ? request('/office').catch(() => ({ items: [], current: null })) : null,
       ])
-      feed.value = items(board)
-      feedCurrent.value = board.current
-      portfolio.value = items(pf).filter(p => p.status !== 'archived')
-      if (health.status !== 'healthy') throw Error('backend_unhealthy')
-      backendOutdated.value = Number(health.contract_version || 0) < API_CONTRACT
-      if (!Array.isArray(caps.permissions)) throw Error('malformed_response')
-      cap.value = caps
-      projects.value = items(ps).filter(p => p.status !== 'archived')
-      if (!projectId.value) {
-        const kept = remembered()
-        if (projects.value.some(p => p.project_id === kept.projectId)) {
-          projectId.value = kept.projectId
-          selectedId.value = kept.taskId || ''
-        } else projectId.value = projects.value[0]?.project_id || ''
+      if (board) {
+        feed.value = items(board)
+        feedCurrent.value = board.current
       }
-      intake.value = portfolio.value.find(p => p.project_id === projectId.value)?.repository
-        ? await request('/projects/' + projectId.value + '/intake')
-        : null
+      if (pf) portfolio.value = items(pf).filter(p => p.status !== 'archived')
+      if (health) {
+        if (health.status !== 'healthy') throw Error('backend_unhealthy')
+        backendOutdated.value = Number(health.contract_version || 0) < API_CONTRACT
+      }
+      if (caps) {
+        if (!Array.isArray(caps.permissions)) throw Error('malformed_response')
+        cap.value = caps
+      }
+      if (ps) {
+        projects.value = items(ps).filter(p => p.status !== 'archived')
+        if (!projectId.value) {
+          const kept = remembered()
+          if (projects.value.some(p => p.project_id === kept.projectId)) {
+            projectId.value = kept.projectId
+            selectedId.value = kept.taskId || ''
+          } else projectId.value = projects.value[0]?.project_id || ''
+        }
+      }
+      if (has('intake'))
+        intake.value = portfolio.value.find(p => p.project_id === projectId.value)?.repository
+          ? await request('/projects/' + projectId.value + '/intake')
+          : null
       if (projectId.value) {
         const id = projectId.value
+        const before = selectedId.value
         const [ts, aps, ds] = await Promise.all([
-          request(
-            `/tasks?project_id=${id}&limit=20&offset=${offset.value}${filter.value ? '&status=' + filter.value : ''}`,
-          ),
-          request(`/approvals?project_id=${id}`),
-          request(`/projects/${id}/drafts`).catch(() => ({ items: [] })),
+          has('tasks')
+            ? request(
+                `/tasks?project_id=${id}&limit=20&offset=${offset.value}${filter.value ? '&status=' + filter.value : ''}`,
+              )
+            : null,
+          has('tasks') ? request(`/approvals?project_id=${id}`) : null,
+          has('drafts') ? request(`/projects/${id}/drafts`).catch(() => ({ items: [] })) : null,
         ])
         if (id !== projectId.value) return
-        tasks.value = items(ts)
-        approvals.value = items(aps)
-        draft.value = items(ds)[0] || null
-        if (!selectedId.value && tasks.value.length) selectedId.value = tasks.value[0].task_id
+        if (ts) {
+          tasks.value = items(ts)
+          if (!selectedId.value && tasks.value.length) selectedId.value = tasks.value[0].task_id
+        }
+        if (aps) approvals.value = items(aps)
+        if (ds) draft.value = items(ds)[0] || null
         remember(id, selectedId.value)
-        if (selectedId.value) {
+        const whole = selectedId.value !== before // a task picked just now: none of its details are here yet
+        const needs = name => whole || has(name)
+        if (selectedId.value && ['task', 'reports', 'events', 'documents', 'messages'].some(needs)) {
           const taskId = selectedId.value
           const [t, r, e, d] = await Promise.all([
-            request('/tasks/' + taskId),
-            request('/tasks/' + taskId + '/reports'),
-            request('/tasks/' + taskId + '/execution-events?limit=100'),
-            request('/tasks/' + taskId + '/documents'),
+            needs('task') ? request('/tasks/' + taskId) : null,
+            needs('reports') ? request('/tasks/' + taskId + '/reports') : null,
+            needs('events') ? loadEvents(taskId, events.value) : null,
+            needs('documents') ? request('/tasks/' + taskId + '/documents') : null,
           ])
           if (taskId === selectedId.value) {
-            taskMessages.value = t.branch ? items(await request('/tasks/' + taskId + '/messages')) : []
-            if (!t.task_id || typeof t.status !== 'string') throw Error('malformed_response')
-            selected.value = t
-            reports.value = items(r)
-            events.value = items(e)
-            documents.value = items(d)
+            if (t && (!t.task_id || typeof t.status !== 'string')) throw Error('malformed_response')
+            if (needs('messages'))
+              taskMessages.value = (t || selected.value)?.branch
+                ? items(await request('/tasks/' + taskId + '/messages'))
+                : []
+            if (t) selected.value = t
+            if (r) reports.value = items(r)
+            if (e) events.value = mergeEvents(knownEvents(events.value, taskId), e)
+            if (d) documents.value = items(d)
           }
         }
       }
       // The office may show a task outside the project picked on the other pages.
       const shown = stageId.value
       if (shown && shown !== selectedId.value) {
-        const [t, e, d] = await Promise.all([
-          request('/tasks/' + shown),
-          request('/tasks/' + shown + '/execution-events?limit=100'),
-          request('/tasks/' + shown + '/documents'),
-        ])
-        if (!t.task_id) throw Error('malformed_response')
-        live.value = { task: t, events: items(e), documents: items(d) }
+        if (has('stage') || live.value?.task?.task_id !== shown) {
+          const [t, e, d] = await Promise.all([
+            request('/tasks/' + shown),
+            loadEvents(shown, live.value?.events),
+            request('/tasks/' + shown + '/documents'),
+          ])
+          if (!t.task_id) throw Error('malformed_response')
+          live.value = {
+            task: t,
+            events: mergeEvents(knownEvents(live.value?.events, shown), e),
+            documents: items(d),
+          }
+        }
       } else live.value = null
       connected.value = true
       updated.value = new Date()
       failures = 0
       error.value = ''
     } catch (e) {
+      failed = true
       connected.value = false
       error.value = e.code || e.message || 'connection_failed'
       failures++
     } finally {
       loading.value = false
-      refreshing = false
-      if (!disposed) {
-        clearTimeout(timer)
-        timer = setTimeout(refresh, Math.min(3000 * 2 ** failures, 30000))
+      // Only a full refresh or a failure moves the timer: a steady flow of events must not put the safety poll off for ever.
+      if (full || failed) scheduleRefresh()
+    }
+  }
+  /** Loads these scopes. A request made during a load waits for its turn and is never dropped. */
+  function load(scopes) {
+    if (disposed) return Promise.resolve()
+    queued = new Set([...(queued || []), ...scopes])
+    running ||= (async () => {
+      while (queued && !disposed) {
+        const next = queued
+        queued = null
+        await loadScopes(next)
       }
+      running = null
+    })()
+    return running
+  }
+  function refresh() {
+    return load(ALL_SCOPES)
+  }
+  function onFrame(type, data) {
+    if (type === 'ready') {
+      streaming.value = true
+      refresh() // whatever happened before this connection, or while it was down
+      return
+    }
+    if (connected.value) updated.value = new Date() // the backend just confirmed nothing else is waiting to be told
+    if (type === 'heartbeat') {
+      selected.value = withHeartbeat(selected.value, data)
+      tasks.value = tasks.value.map(t => withHeartbeat(t, data))
+      feed.value = feed.value.map(p => ({ ...p, tasks: (p.tasks || []).map(t => withHeartbeat(t, data)) }))
+      if (live.value) live.value = { ...live.value, task: withHeartbeat(live.value.task, data) }
+      return
+    }
+    const scopes = scopesFor(type, data, {
+      selectedId: selectedId.value,
+      stageId: stageId.value,
+      projectId: projectId.value,
+    })
+    if (type === 'execution') {
+      // Added only to a history already loaded. An empty one is still loading, and starts from the beginning.
+      if (data.task_id === selectedId.value) {
+        const held = knownEvents(events.value, data.task_id)
+        if (held.length) events.value = mergeEvents(held, [data.event])
+        else scopes.add('events')
+      }
+      const shown = knownEvents(live.value?.events, data.task_id)
+      if (shown.length) live.value = { ...live.value, events: mergeEvents(shown, [data.event]) }
+    }
+    if (!scopes.size) return
+    for (const scope of scopes) frameScopes.add(scope)
+    frameTimer ??= setTimeout(() => {
+      frameTimer = null
+      const next = frameScopes
+      frameScopes = new Set()
+      load(next)
+    }, FRAME_DELAY_MS)
+  }
+  function onStreamLost() {
+    streaming.value = false
+    refresh() // the safety poll may be up to 30 seconds away
+  }
+  function connectStream() {
+    if (!stream && !disposed && !document.hidden) stream = openStream({ onFrame, onLost: onStreamLost })
+  }
+  function disconnectStream() {
+    stream?.close()
+    stream = null
+    streaming.value = false
+  }
+  // Browsers allow six connections to one host: tabs nobody is looking at must not hold them.
+  function onVisibility() {
+    if (document.hidden) {
+      disconnectStream()
+      scheduleRefresh()
+    } else {
+      connectStream()
+      refresh()
     }
   }
   async function changeProject() {
@@ -661,13 +796,19 @@ export const useOfficeStore = defineStore('office', () => {
   }
   function start() {
     disposed = false
-    refresh()
+    // After the first load, because that load is what gets the session cookie the stream needs.
+    refresh().then(connectStream)
+    document.addEventListener('visibilitychange', onVisibility)
     freshnessTimer = setInterval(() => (clock.value = Date.now()), 1000)
   }
   function stop() {
     disposed = true
     clearTimeout(timer)
+    clearTimeout(frameTimer)
+    frameTimer = null
     clearInterval(freshnessTimer)
+    document.removeEventListener('visibilitychange', onVisibility)
+    disconnectStream()
   }
   return {
     redivide,
@@ -712,6 +853,7 @@ export const useOfficeStore = defineStore('office', () => {
     events,
     cap,
     connected,
+    streaming,
     loading,
     busy,
     error,
