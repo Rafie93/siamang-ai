@@ -87,6 +87,9 @@ it('says which stage failed and after how many tries', () => {
     'Arsitek merancang gagal setelah 3 percobaan. Model terlalu lama menjawab.',
   )
   expect(failureText({ cause: 'rate_limited' })).toBe('Batas pemakaian model tercapai. Coba lagi nanti.')
+  expect(
+    failureText({ cause: 'programmer_change_rejected', reason: 'path rejected', where: ['change_01', 'a.py'] }),
+  ).toBe('Perubahan dari Programmer tidak lolos pemeriksaan. path rejected (change_01, a.py)')
 })
 it('labels a package with its wave and how often it was tried', () => {
   expect(packageNote({ wave: 0, attempt: 1 })).toBe('')

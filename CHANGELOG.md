@@ -24,6 +24,7 @@ Notable changes to Siamang. No version has been tagged as a GitHub release yet.
 
 ### Fixed
 
+- A Programmer change labelled `create` on an existing file it had read no longer fails the task: it becomes a modification, with a warning. A file it never saw is still refused, and a failed task now names the rejected path.
 - The **Bagi ulang** button always failed, because the gateway did not allow `POST /tasks/{id}/work-division`.
 
 History before 0.3.0 is not published.

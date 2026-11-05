@@ -276,7 +276,7 @@ class Programmer:
         warnings, unknowns = list(notes["warnings"]), list(notes["unknowns"])
         changes = []
         for i, item in enumerate(draft.changes, 1):
-            changes.append(self._change(i, item, context, snapshot, unknowns))
+            changes.append(self._change(i, item, context, snapshot, warnings, unknowns))
         sizes = [c.size for c in changes]
         if any(s > policy.max_file_size for s in sizes):
             raise ProgrammingPolicyError(f"a proposed file exceeds {policy.max_file_size} bytes", cause="model_output")
@@ -304,7 +304,7 @@ class Programmer:
 
     @staticmethod
     def _change(position: int, item: Any, context: ProgrammingContext, snapshot: ProjectSnapshot,
-                unknowns: list[str]) -> ProposedChange:
+                warnings: list[str], unknowns: list[str]) -> ProposedChange:
         cid = change_id(position)
         if item["step_id"] not in context.step_ids:
             raise ProgrammerModelOutputError("change names a step that is not in the plan", details=(cid,))
@@ -323,7 +323,12 @@ class Programmer:
             unknowns.append(_note(f"{probe.path}: current state not verified ({before.note}); re-check before "
                                   "applying."))
         if operation is Operation.CREATE and before.state is BeforeState.OBSERVED:
-            raise ChangeRejectedError("cannot create a file that already exists", details=(cid, probe.path))
+            # A file the model read and rewrote is a mislabelled modification. One it never saw would be overwritten blind.
+            if not any(shown.path == probe.path for shown in context.files):
+                raise ChangeRejectedError("cannot create a file that already exists and was not shown to the model",
+                                          details=(cid, probe.path))
+            operation = Operation.MODIFY
+            warnings.append(_note(f"{probe.path}: proposed as create, but the file exists; treated as a modification."))
         if operation is not Operation.CREATE and before.state is BeforeState.ABSENT:
             raise ChangeRejectedError(f"cannot {operation} a file that does not exist", details=(cid, probe.path))
         return ProposedChange(cid, probe.path, operation, item["step_id"], item["reason"],

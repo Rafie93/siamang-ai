@@ -315,7 +315,6 @@ def test_unknown_step_reference(setup):
 @pytest.mark.parametrize("bad, code", [
     (change("missing.py", "modify"), "programmer_change_rejected"),
     (change("missing.py", "delete", None), "programmer_change_rejected"),
-    (change(AUTH, "create"), "programmer_change_rejected"),
     (change(AUTH, "modify", AUTH_TEXT), "programmer_change_rejected"),  # "modification" that changes nothing
     (change("Backend/routes/auth.py", "create"), "programmer_change_rejected"),  # case-only clash with backend/
     (change("backend", "modify"), "programmer_change_rejected"),  # a directory
@@ -324,6 +323,23 @@ def test_unknown_step_reference(setup):
 def test_changes_checked_against_the_snapshot(setup, bad, code):
     r = setup.programmer(make_model(reply([bad]))).program(setup.request())
     assert failed(r) == code
+
+
+def test_create_on_a_file_the_model_read_becomes_a_modification(setup):
+    r = setup.programmer(make_model(reply([change(AUTH, "create", "x = 2\n")]))).program(setup.request())
+    assert r.status.value == "completed" and AUTH in r.metadata["context_files"]
+    made = r.patch.changes[0]
+    assert (made.path, made.operation.value, made.before.value) == (AUTH, "modify", "observed")
+    assert made.before_hash == sha(AUTH_TEXT) and made.after_content == "x = 2\n"
+    assert any(AUTH in w and "treated as a modification" in w for w in r.warnings)
+
+
+def test_create_on_a_file_the_model_never_saw_is_refused(setup):
+    write(setup.root, {"unseen.py": "x = 1\n"})
+    r = setup.programmer(make_model(reply([change("unseen.py", "create", "x = 2\n")]))).program(setup.request())
+    assert failed(r) == "programmer_change_rejected"
+    assert "unseen.py" not in r.metadata["context_files"] and "unseen.py" in r.error["details"]
+    assert (setup.root / "unseen.py").read_text() == "x = 1\n"
 
 
 def test_symlinks_are_never_targets(setup, tmp_path):

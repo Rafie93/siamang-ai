@@ -781,7 +781,8 @@ class Runtime:
                         error = programmer.last.error or {}
                         engine.fail(task_id, TaskFailure('PROGRAMMER_FAILED', 'Programmer could not produce a proposal.', retryable=True,
                                                          details={'cause': str(error.get('code', 'unknown')),
-                                                                  'reason': str(error.get('message', ''))[:300]}))
+                                                                  'reason': str(error.get('message', ''))[:300],
+                                                                  'where': [str(d) for d in error.get('details', ())][:5]}))
                         store.update(run_id, state='failed', phase='failed')
                         return None
                 if recovered:

@@ -81,7 +81,8 @@ change = {"path": str, "operation": "create" | "modify" | "delete", "step_id": s
 Rules:
 - path: project-relative POSIX path (e.g. "src/app.py"). Never absolute, never "~", "..", or backslashes.
 - Never touch .git/, .env files, keys, certificates, credentials or secrets files.
-- create/modify: "content" is the COMPLETE new text of the file. delete: omit "content".
+- create is only for a file that does not exist yet. A file that exists is always modify, even when you rewrite
+  all of it. create/modify: "content" is the COMPLETE new text of the file. delete: omit "content".
 - One change per path. At most `limits.max_changes` changes. Text files only.
 - step_id must be a step_id from the plan. reason says which requirement the change satisfies.
 - evidence cites only what the analysis or the shown files actually contain. Do not invent evidence.

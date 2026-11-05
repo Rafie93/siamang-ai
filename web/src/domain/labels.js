@@ -30,7 +30,7 @@ export const ERROR_TEXT = {
   programmer_model_timeout: 'Programmer terlalu lama menjawab, bahkan setelah dicoba lagi.',
   programmer_model_invalid_output: 'Jawaban Programmer tidak bisa dibaca sebagai patch.',
   programmer_model_unavailable: 'Model Programmer tidak tersedia.',
-  programmer_change_rejected: 'Perubahan dari Programmer ditolak pemeriksaan keamanan.',
+  programmer_change_rejected: 'Perubahan dari Programmer tidak lolos pemeriksaan.',
   patch_stale: 'File di repo sudah berubah sejak patch dibuat.',
   redivide_failed: 'Pembagian kerja belum bisa diulang. Coba lagi.',
   design_not_pending: 'Desain ini sedang tidak menunggu persetujuan.',
@@ -154,7 +154,11 @@ export function attemptText(e) {
 
 /** Why a failed task stopped, with the stage and how many tries it had. */
 export function failureText(details, phaseText = PHASE_TEXT) {
-  const cause = errorText(details?.cause)
+  let cause = errorText(details?.cause)
+  if (details?.cause === 'programmer_change_rejected' && details.reason) {
+    const where = details.where?.length ? ` (${details.where.join(', ')})` : ''
+    cause += ` ${details.reason}${where}`
+  }
   return details?.attempts > 1
     ? `${phaseText[details.stage] || details.stage || 'Tahap ini'} gagal setelah ${details.attempts} percobaan. ${cause}`
     : cause
