@@ -126,3 +126,256 @@ test('an open diagram does not widen the page on a phone', async ({ page }) => {
   await expect(panel(page, 'PRD').locator('.mermaid-diagram svg')).toBeVisible({ timeout: 15000 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
+
+test.describe('the diagram editor', () => {
+  const SOURCE = 'classDiagram\n  class Lama'
+  const content = '# Class\n\nPengantar.\n\n```mermaid\n' + SOURCE + '\n```\n\nPenutup.'
+  const gate = {
+    ...task,
+    status: 'waiting',
+    execution: { state: 'waiting', phase: 'design_approval', wait_reason: 'design_approval' },
+  }
+  const designDoc = (over = {}) => ({
+    kind: 'class_diagram',
+    stage: 'analysis',
+    status: 'generated',
+    source: 'authored',
+    content,
+    content_sha256: 'a'.repeat(64),
+    reason: '',
+    model_id: 'model-x',
+    edited_by: null,
+    ...over,
+  })
+  async function atTheGate(
+    page,
+    saved = { status: 200, json: { content_sha256: 'b'.repeat(64), changed: true } },
+  ) {
+    const sent = []
+    let current = designDoc()
+    await fixture(page)
+    await page.route('**/api/v0/tasks/tsk_doc', route => route.fulfill({ json: gate }))
+    await page.route('**/api/v0/tasks?*', route => route.fulfill({ json: { items: [gate] } }))
+    await page.route('**/api/v0/tasks/tsk_doc/documents', route =>
+      route.fulfill({ json: { items: [current] } }),
+    )
+    await page.route('**/api/v0/tasks/tsk_doc/documents/class_diagram/diagrams/0', route => {
+      sent.push(route.request().postDataJSON())
+      if (saved.status === 200)
+        current = designDoc({
+          content: content.replace(SOURCE, sent.at(-1).source),
+          content_sha256: 'b'.repeat(64),
+          edited_by: 'owner',
+        })
+      return route.fulfill(saved)
+    })
+    await page.reload()
+    await page.getByRole('tab', { name: /Arsitek/ }).click()
+    await header(page, 'Class Diagram').click()
+    await panel(page, 'Class Diagram').getByRole('button', { name: 'Edit diagram' }).click()
+    return { sent, dialog: page.locator('dialog.diagram-editor') }
+  }
+
+  test('preview follows the code, a mistake blocks saving, and saving sends the base it opened on', async ({
+    page,
+  }) => {
+    const errors = []
+    page.on('pageerror', e => errors.push(e.message))
+    const { sent, dialog } = await atTheGate(page)
+    const code = dialog.getByLabel('Kode Mermaid'),
+      save = dialog.getByRole('button', { name: 'Simpan' }),
+      picture = dialog.locator('.diagram-editor-preview .mermaid-diagram')
+    await expect(code).toHaveValue(SOURCE)
+    await expect(picture).toContainText('Lama', { timeout: 15000 })
+    await expect(save).toBeDisabled()
+
+    const [left, right] = await Promise.all([
+      code.boundingBox(),
+      dialog.locator('.diagram-editor-preview').boundingBox(),
+    ])
+    expect(left.x + left.width).toBeLessThan(right.x)
+
+    await code.fill('classDiagram\n  class Baru')
+    await expect(picture).toContainText('Baru')
+    await expect(save).toBeEnabled()
+    await page.screenshot({ path: test.info().outputPath('editor.png') })
+
+    await code.fill('classDiagram\n  class {{{')
+    await expect(dialog.getByRole('alert')).toBeVisible()
+    await expect(save).toBeDisabled()
+    await expect(picture).toContainText('Baru') // the last good picture stays while the code is wrong
+
+    await code.fill('classDiagram\n  class Baru')
+    await expect(save).toBeEnabled()
+    await save.click()
+    await expect(dialog).toBeHidden()
+    expect(sent).toEqual([{ source: 'classDiagram\n  class Baru', base_sha256: 'a'.repeat(64) }])
+    await expect(panel(page, 'Class Diagram')).toContainText('Diedit owner')
+    await expect(panel(page, 'Class Diagram').locator('.mermaid-diagram')).toContainText('Baru')
+    expect(errors).toEqual([])
+  })
+
+  test('a refused save keeps the text, and closing with unsaved text asks first', async ({ page }) => {
+    const { dialog } = await atTheGate(page, {
+      status: 409,
+      json: { error: { code: 'document_changed' } },
+    })
+    const code = dialog.getByLabel('Kode Mermaid')
+    await code.fill('classDiagram\n  class Baru')
+    await expect(dialog.getByRole('button', { name: 'Simpan' })).toBeEnabled({ timeout: 15000 })
+    await dialog.getByRole('button', { name: 'Simpan' }).click()
+    await expect(dialog).toContainText('sudah berubah sejak editor dibuka')
+    await expect(code).toHaveValue('classDiagram\n  class Baru')
+    await dialog.getByRole('button', { name: 'Batal' }).click()
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: 'Buang perubahan' }).click()
+    await expect(dialog).toBeHidden()
+  })
+
+  test('approving asks whether to send the changed diagrams to the Programmer', async ({ page }) => {
+    await fixture(page)
+    const approved = []
+    await page.route('**/api/v0/tasks/tsk_doc', route => route.fulfill({ json: gate }))
+    await page.route('**/api/v0/tasks?*', route => route.fulfill({ json: { items: [gate] } }))
+    await page.route('**/api/v0/tasks/tsk_doc/document-edits', route =>
+      route.fulfill({
+        json: {
+          items: [
+            {
+              kind: 'class_diagram',
+              title: 'Class Diagram',
+              diagram: 0,
+              added: 2,
+              removed: 1,
+              edited_by: 'owner',
+            },
+            { kind: 'erd', title: 'ERD', diagram: 0, added: 1, removed: 0, edited_by: 'owner' },
+          ],
+          clipped: ['erd'],
+          divided: true,
+        },
+      }),
+    )
+    await page.route('**/api/v0/tasks/tsk_doc/design-decision', route => {
+      approved.push(route.request().postDataJSON())
+      return route.fulfill({ json: { run_id: 'run_1', decision: 'approve', task_id: 'tsk_doc' } })
+    })
+    await page.goto('/tasks')
+    await page.getByRole('button', { name: 'Setujui desain' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Ada 2 diagram berubah. Kirim ke Programmer?' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('Class Diagram')
+    await expect(dialog).toContainText('+2 / −1')
+    await expect(dialog).toContainText('bisa terpotong: ERD')
+    await expect(dialog.getByRole('button', { name: 'Bagi ulang dulu' })).toBeVisible()
+    await dialog.getByRole('button', { name: 'Kirim ke Programmer' }).click()
+    await expect(dialog).toBeHidden()
+    expect(approved).toEqual([{ decision: 'approve' }])
+  })
+
+  test('a shipped task keeps its document, shows the proposal, and asks to make a revision', async ({
+    page,
+  }) => {
+    const errors = []
+    page.on('pageerror', e => errors.push(e.message))
+    const shipped = { ...task, branch: { publication: 'published', branch: 'siamang/x' } }
+    let proposal = null
+    const sent = []
+    await fixture(page)
+    await page.route('**/api/v0/tasks/tsk_doc', route => route.fulfill({ json: shipped }))
+    await page.route('**/api/v0/tasks?*', route => route.fulfill({ json: { items: [shipped] } }))
+    await page.route('**/api/v0/tasks/tsk_doc/documents', route =>
+      route.fulfill({ json: { items: [designDoc()] } }),
+    )
+    await page.route('**/api/v0/tasks/tsk_doc/document-edits', route =>
+      route.fulfill({
+        json: {
+          mode: 'revision',
+          items: proposal ? [proposal] : [],
+          pending: !!proposal,
+          clipped: [],
+          divided: false,
+        },
+      }),
+    )
+    await page.route('**/api/v0/tasks/tsk_doc/documents/class_diagram/diagrams/0', route => {
+      proposal = {
+        kind: 'class_diagram',
+        title: 'Class Diagram',
+        diagram: 0,
+        source: route.request().postDataJSON().source,
+        added: 1,
+        removed: 1,
+        edited_by: 'owner',
+      }
+      return route.fulfill({ json: { content_sha256: 'a'.repeat(64), changed: true, mode: 'revision' } })
+    })
+    await page.route('**/api/v0/tasks/tsk_doc/design-edits/send', route => {
+      sent.push(route.request().postDataJSON())
+      return route.fulfill({
+        status: 202,
+        json: {
+          mode: 'revision',
+          scheduled: true,
+          task: { task_id: 'tsk_rev', status: 'queued', description: 'Revisi diagram' },
+        },
+      })
+    })
+    await page.reload()
+    await page.getByRole('tab', { name: /Arsitek/ }).click()
+    await header(page, 'Class Diagram').click()
+    await panel(page, 'Class Diagram').getByRole('button', { name: 'Edit diagram' }).click()
+    const editor = page.locator('dialog.diagram-editor')
+    await expect(editor).toContainText('sudah terbit')
+    await editor.getByLabel('Kode Mermaid').fill('classDiagram\n  class Baru')
+    await expect(editor.getByRole('button', { name: 'Simpan' })).toBeEnabled({ timeout: 15000 })
+    await editor.getByRole('button', { name: 'Simpan' }).click()
+    await expect(editor).toBeHidden()
+    await expect(panel(page, 'Class Diagram')).toContainText('1 usulan revisi')
+    await expect(panel(page, 'Class Diagram').locator('.mermaid-diagram')).toContainText('Baru')
+    await page.getByRole('button', { name: 'Buat task revisi' }).click()
+    const question = page.getByRole('dialog', { name: 'Ada 1 diagram berubah. Buat task revisi?' })
+    await expect(question).toContainText('Kode dan dokumen task ini tidak berubah')
+    await question.getByLabel('Catatan untuk tim (opsional)').fill('Jaga nama lama.')
+    await question.getByRole('button', { name: 'Buat task revisi' }).click()
+    await expect(question).toBeHidden()
+    expect(sent).toEqual([{ note: 'Jaga nama lama.' }])
+    await expect(page).toHaveURL(/\/tasks/)
+    expect(errors).toEqual([])
+  })
+
+  test('a stopped run offers the edit and asks before coding again', async ({ page }) => {
+    const stopped = {
+      ...task,
+      status: 'waiting',
+      execution: { state: 'waiting', phase: 'blocked', wait_reason: 'quality_gate' },
+    }
+    const sent = []
+    await fixture(page)
+    await page.route('**/api/v0/tasks/tsk_doc', route => route.fulfill({ json: stopped }))
+    await page.route('**/api/v0/tasks?*', route => route.fulfill({ json: { items: [stopped] } }))
+    await page.route('**/api/v0/tasks/tsk_doc/document-edits', route =>
+      route.fulfill({
+        json: {
+          mode: 'stopped',
+          items: [{ kind: 'erd', title: 'ERD', diagram: 0, added: 1, removed: 0, edited_by: 'owner' }],
+          pending: true,
+          clipped: [],
+          divided: true,
+        },
+      }),
+    )
+    await page.route('**/api/v0/tasks/tsk_doc/design-edits/send', route => {
+      sent.push(route.request().postDataJSON())
+      return route.fulfill({ status: 202, json: { mode: 'stopped', state: 'scheduled', task_id: 'tsk_doc' } })
+    })
+    await page.goto('/tasks')
+    await page.getByRole('button', { name: 'Kirim ke Programmer' }).click()
+    const question = page.getByRole('dialog', { name: 'Ada 1 diagram berubah. Kirim ke Programmer?' })
+    await expect(question).toContainText('termasuk yang sudah lulus')
+    await expect(question.getByRole('button', { name: 'Bagi ulang dulu' })).toHaveCount(0)
+    await question.getByRole('button', { name: 'Kirim ke Programmer' }).click()
+    await expect(question).toBeHidden()
+    expect(sent).toEqual([{}])
+  })
+})

@@ -1,4 +1,5 @@
 """Several Programmers on one approved task: real threads, real Git for the result, GitHub's API faked."""
+import hashlib
 import json
 import threading
 import time
@@ -634,3 +635,31 @@ def test_a_retry_keeps_the_division_without_asking_for_it_again(tmp_path):
         packages = snapshot(client, task_id)['packages']
     assert len(world.asked) == 1 and [p['title'] for p in packages] == ['Fondasi', 'Backend', 'Frontend']
     assert {p['state'] for p in packages} == {'pending'}
+
+
+def test_sending_a_changed_diagram_works_every_package_again_since_what_passed_used_the_old_one(world):
+    attempts = []
+    outside = reply([dict(path='frontend/stolen.py', operation='create', step_id='step_03', reason='x', content='x = 1\n')])
+
+    def trespass(request):
+        attempts.append(request)
+        return outside if len(attempts) <= 2 else None
+
+    team = Team(script={'Backend': trespass})
+    world.programmer = make_model(team)
+    with TestClient(world.app()) as client:
+        project_id = new_project(client, world)
+        task_id = to_design(client, world, project_id)
+        approve_design(client, task_id)
+        assert waited(client, task_id)['execution']['wait_reason'] == 'quality_gate'
+        content = '```mermaid\nclassDiagram\n  class Lama\n```'
+        sha = hashlib.sha256(content.encode()).hexdigest()
+        with Database(world.settings.database) as db:
+            db.conn.execute("UPDATE api_documents SET content=?, content_sha256=? WHERE task_id=? AND kind='class_diagram'", (content, sha, task_id))
+        assert client.post(f'/v0/tasks/{task_id}/documents/class_diagram/diagrams/0', headers=headers('approver'),
+                           json={'source': 'classDiagram\n  class Baru', 'base_sha256': sha}).status_code == 200
+        before = list(team.seen)
+        assert client.post(f'/v0/tasks/{task_id}/design-edits/send', headers=headers('approver'), json={}).status_code == 202
+        done = wait_execution(client, task_id, 'awaiting_approval')
+        assert {p['state'] for p in done['packages']} == {'passed'}
+        assert sorted(team.seen[len(before):]) == ['Backend', 'Fondasi', 'Frontend']

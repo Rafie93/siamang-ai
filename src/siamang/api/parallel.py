@@ -8,13 +8,16 @@ result is the ordinary evidence the approval already seals, so the gate itself i
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import threading
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
 from siamang.analyst import AnalysisRequest, SystemAnalyst
+from siamang.analyst.analysis import PLANNED_PATHS, SystemAnalysis
 from siamang.documents.packages import FOUNDATION, WorkPackage, owned, split_owns
 from siamang.ids import new_id
 from siamang.jsondata import thaw
@@ -60,6 +63,25 @@ ONE_ROUND = LoopPolicy(max_iterations=1, max_programmer_calls=1, max_qa_calls=1,
 FOCUS_LIMIT = 20
 INPUT_DESIGN_BYTES = 3_000
 SPEC_BYTES = 1_200
+PLANNED_PATHS_MAX = 200
+# A project-relative file name with an extension, not part of a URL, an e-mail address, or a longer path.
+_NAMED_PATH_RE = re.compile(r"(?<![\w./@:-])(?:\./)?((?:[\w.-]+/)*[\w.-]*[\w-]\.[A-Za-z][A-Za-z0-9]{0,9})(?![\w/-])")
+
+
+def named_paths(texts: Iterable[str]) -> tuple[str, ...]:
+    """The file paths these texts name, in order of first mention. A name is not a claim that the file exists."""
+    found = dict.fromkeys(m for text in texts for m in _NAMED_PATH_RE.findall(text or ""))
+    return tuple(found)[:PLANNED_PATHS_MAX]
+
+
+def with_planned_paths(analysis: SystemAnalysis, texts: Iterable[str]) -> SystemAnalysis:
+    """Record what the owner's documents name, apart from what the analysis observed in the repository.
+
+    QA and the Reviewer read this as scope: a new file the owner asked for is not a change outside the task.
+    It stays in the analysis, so the approval check re-derives the same judgment from the same evidence.
+    """
+    paths = named_paths(texts)
+    return replace(analysis, metadata={**analysis.metadata, PLANNED_PATHS: list(paths)}) if paths else analysis
 
 
 def failure_reason(error):
@@ -131,8 +153,9 @@ class Merged(Programmer):
 
 
 class PackageRun:
-    def __init__(self, runtime, run_id, ids, plan, base_input, names, limit):
+    def __init__(self, runtime, run_id, ids, plan, base_input, names, limit, owner_texts=()):
         self.runtime, self.run_id, self.ids, self.plan = runtime, run_id, ids, plan
+        self.owner_texts = owner_texts
         self.base_input, self.names, self.limit = base_input, names, limit
         self.task_id, self.project_id = ids['task_id'], ids['project_id']
         self.workdir = runtime.settings.database.parent / 'packages' / run_id
@@ -208,8 +231,8 @@ class PackageRun:
 
         step('analysis')
         root = self._copy(row, applied)
-        analysis = rooted(SystemAnalyst, root)(engine).analyze(AnalysisRequest(
-            **self.ids, plan=self.plan, focus=self._focus(row, owns, applied), scope=owns))
+        analysis = with_planned_paths(rooted(SystemAnalyst, root)(engine).analyze(AnalysisRequest(
+            **self.ids, plan=self.plan, focus=self._focus(row, owns, applied), scope=owns)), self.owner_texts)
 
         class Coding(rooted(Programmer, root)):
             iteration = 0

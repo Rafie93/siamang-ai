@@ -38,6 +38,7 @@ from siamang.documents.author import (
     write_documents,
 )
 from siamang.documents.catalog import SPECS, DocumentStatus, Source, specs_for
+from siamang.documents.diagrams import InvalidDiagram, changed_diagrams, diagrams_of, fenced, line_changes, replace_diagram
 from siamang.documents.derive import programmer_documents, qa_documents, review_documents
 from siamang.documents.packages import divide, render
 from siamang.documents.lead import (
@@ -70,7 +71,7 @@ from siamang.tasks.definition import TaskRequest
 
 from .codec import decode, encode
 from . import autonomy, ci_repair, recover, verify
-from .parallel import ONE_ROUND, QA_POLICY, INTEGRATION_REVIEW, INPUT_DESIGN_BYTES, SPEC_BYTES, Merged, PackageRun, PackageStopped, commit_groups, merge_patches
+from .parallel import ONE_ROUND, QA_POLICY, INTEGRATION_REVIEW, INPUT_DESIGN_BYTES, SPEC_BYTES, Merged, PackageRun, PackageStopped, commit_groups, merge_patches, with_planned_paths
 from .store import RunStore, now
 from .stream import ChangeHub
 
@@ -135,6 +136,11 @@ def conversation_tail(messages, limit=1_000):
     return '\n'.join(lines).encode()[-limit:].decode(errors='ignore')
 
 
+def _owner_texts(spec, design):
+    """What the owner approved: the specification and the design. Reports of earlier attempts are not in ``design``."""
+    return [spec or '', *(d.content for d in design if d.status is DocumentStatus.GENERATED)]
+
+
 def _blockers(loop):
     """What QA and the Reviewer still hold against the last attempt, most serious first."""
     results = [r for r in (loop.final_qa_result, loop.final_review_result) if r]
@@ -166,11 +172,14 @@ def _pull_request_body(task, patch, loop, debt='', actor=None, report=None):
 
 
 def _stored(row):
-    return Document(SPECS[row['kind']], DocumentStatus(row['status']), row['content'], row['reason'], row['model_id'])
+    return Document(SPECS[row['kind']], DocumentStatus(row['status']), row['content'], row['reason'], row['model_id'],
+                    row.get('edited_by'))
 
 
 def _basis(task, spec, conversation, project):
     """What the design was written for: another instruction, specification, or answer means another design."""
+    # Sending an edit changes no answer, so a retry keeps the design the owner edited.
+    conversation = [m for m in conversation if not m.get('design_edit')]
     return hashlib.sha256(json.dumps([task.description, spec, conversation, project.name, project.description],
                                      sort_keys=True, default=str).encode()).hexdigest()
 
@@ -615,6 +624,10 @@ class Runtime:
                 if repo:
                     brief |= dict(project_spec=spec, task_conversation=conversation,
                                   repository=read_context(self._repos, project.root_path))
+                owner_diagrams = store.diagrams_for_revision(task_id) if gated else []
+                if owner_diagrams:
+                    brief |= dict(owner_diagrams=[dict(document=d['kind'], diagram=d['diagram'], source=clip(d['source']))
+                                                  for d in owner_diagrams])
                 # A retry resumes from what an earlier run finished, but only for the same instruction, specification and answers.
                 state['basis'] = _basis(task, spec, conversation, project)
                 briefed = len(reused_for('briefing')) == len(specs_for('briefing', Source.AUTHORED))  # the Lead already cleared this
@@ -631,11 +644,15 @@ class Runtime:
                     for stage in DESIGN_STAGES:
                         prior = {d.spec.kind: clip(d.content) for d in design if d.status is DocumentStatus.GENERATED}
                         design += documents(stage, brief | dict(prior_documents=prior), required=True)
+                    if owner_diagrams:
+                        self._apply_owner_diagrams(db, store, run_id, task_id, owner_diagrams)
+                        design = [_stored(r) for r in store.documents(task_id, run_id) if r['stage'] in DESIGN_STAGES]
                     if not self._divide(db, store, engine, run_id, task, spec, conversation,
                                         brief['repository'] if repo else None, design, state['basis']):
                         return None
                     return self._design_gate(db, store, engine, run_id, task)
                 design = stored
+                analysis = with_planned_paths(analysis, _owner_texts(spec, design))
 
                 class TrackedProgrammer(Programmer):
                     iteration = 0
@@ -1033,7 +1050,8 @@ class Runtime:
         base = design_input(design, budget=INPUT_DESIGN_BYTES) | ({'project_spec': clip_bytes(spec, SPEC_BYTES)} if spec else {})
         if conversation:
             base |= {'owner_conversation': conversation_tail(conversation)}
-        run = PackageRun(self, run_id, ids, plan, base, self._repos.files(project.root_path), self.parallel_limit())
+        owner_texts = _owner_texts(spec, design)
+        run = PackageRun(self, run_id, ids, plan, base, self._repos.files(project.root_path), self.parallel_limit(), owner_texts)
         for attempt in (1, 2):
             try:
                 rows = run.execute(store, project.root_path)
@@ -1067,8 +1085,8 @@ class Runtime:
                                      [str(getattr(exc, 'message', type(exc).__name__))])
                 return None
             owns = [o for r in rows for o in json.loads(r['owns'])]
-            analysis = SystemAnalyst(engine).analyze(AnalysisRequest(
-                **ids, plan=plan, focus=tuple(c.path for c in merged.changes)[:20], scope=tuple(dict.fromkeys(owns))[:20]))
+            analysis = with_planned_paths(SystemAnalyst(engine).analyze(AnalysisRequest(
+                **ids, plan=plan, focus=tuple(c.path for c in merged.changes)[:20], scope=tuple(dict.fromkeys(owns))[:20])), owner_texts)
 
             def stage(cls, method, name):
                 class Tracked(cls):
@@ -1604,7 +1622,7 @@ class Runtime:
             store.add_draft_message(draft, 'lead', reply.payload(), state='ready' if reply.ready else 'need_answers',
                                     brief=brief, title=title, error=None)
 
-    def post_task_message(self, task_id, content):
+    def post_task_message(self, task_id, content, *, accepted=None, design_edit=False):
         with Database(self.settings.database) as db:
             store, engine = RunStore(db), TaskEngine(db, ProjectRegistry(db))
             task, row = engine.get(task_id), store.latest(task_id)
@@ -1617,8 +1635,10 @@ class Runtime:
                 raise RuntimeRefusal('worker_busy', 409)
             try:
                 with db.transaction():
-                    store.add_message(task.project_id, task_id, 'owner', {'message': content})
+                    store.add_message(task.project_id, task_id, 'owner', {'message': content} | ({'design_edit': True} if design_edit else {}))
                     store.update(row['run_id'], state='scheduled', phase='queued')
+                    if accepted:
+                        accepted(store)
                 # An approved design stays approved: only an earlier stop goes through the design again.
                 mode = 'code' if store.design_approved(row['run_id']) else 'start'
                 self._pool.submit(self._work, row['run_id'], mode)
@@ -1626,6 +1646,126 @@ class Runtime:
                 self._busy.release()
                 raise
             return dict(task_id=task_id, run_id=row['run_id'], state='scheduled')
+
+    def _apply_owner_diagrams(self, db, store, run_id, task_id, diagrams):
+        """A revision's freshly written design takes the diagrams the owner drew, each kept as their edit."""
+        documents = {d['kind']: d for d in store.documents(task_id, run_id)}
+        with db.transaction():
+            for owner in diagrams:
+                document = documents.get(owner['kind'])
+                if document is None:
+                    store.save_documents(run_id, task_id, (Document(SPECS[owner['kind']], DocumentStatus.GENERATED),))
+                    document = next(d for d in store.documents(task_id, run_id) if d['kind'] == owner['kind'])
+                written = document['content'] if document['status'] == 'generated' else ''
+                try:
+                    content = replace_diagram(written, owner['diagram'], owner['source'])
+                except IndexError:  # the new document has fewer diagrams: this one still belongs in it
+                    content = f"{written}\n\n{fenced(owner['source'])}".lstrip()
+                if content != document['content']:
+                    sha = store.edit_document(document, owner['diagram'], content, owner['edited_by'])
+                    documents[owner['kind']] = document | dict(content=content, content_sha256=sha, status='generated')
+
+    def _edit_mode(self, store, task, row):
+        """How the owner may change this task's diagrams now, or ``None``.
+
+        ``gate``: the design awaits approval. ``stopped``: coding stopped short and can go again on the changed design.
+        ``revision``: the code shipped, so a change goes to a new task and this task's record stands.
+        """
+        if not row:
+            return None
+        if task.status == 'waiting' and row['state'] == 'waiting' and row['wait_reason'] == 'design_approval':
+            return 'gate'
+        if (task.status == 'waiting' and row['state'] in ('waiting', 'interrupted') and row['wait_reason'] in ANSWERABLE
+                and store.design_approved(row['run_id'])):
+            return 'stopped'
+        branch = store.branch(task.task_id)
+        return 'revision' if task.status == 'completed' and branch and branch['publication'] == 'published' else None
+
+    def edit_mode(self, task_id):
+        with Database(self.settings.database) as db:
+            store = RunStore(db)
+            return self._edit_mode(store, TaskEngine(db, ProjectRegistry(db)).get(task_id), store.latest(task_id))
+
+    def edit_diagram(self, task_id, principal, kind, index, source, base_sha256):
+        """The owner changes one diagram. The earlier text is kept; on a shipped task the document itself does not change."""
+        with Database(self.settings.database) as db:
+            store, engine = RunStore(db), TaskEngine(db, ProjectRegistry(db))
+            with db.transaction():
+                task, row = engine.get(task_id), store.latest(task_id)
+                if not principal.allows_project(task.project_id):
+                    raise RuntimeRefusal('forbidden', 403)
+                mode = self._edit_mode(store, task, row)
+                if mode is None:
+                    raise RuntimeRefusal('design_not_pending')
+                document = next((d for d in store.documents(task_id, row['run_id']) if d['kind'] == kind
+                                 and d['stage'] in DESIGN_STAGES and d['status'] == 'generated'), None)
+                if document is None:
+                    raise RuntimeRefusal('diagram_not_found', 404)
+                if document['content_sha256'] != base_sha256:
+                    raise RuntimeRefusal('document_changed', 409)
+                try:
+                    content = replace_diagram(document['content'], index, source)
+                except InvalidDiagram as exc:
+                    raise RuntimeRefusal('diagram_invalid', 422) from exc
+                except IndexError as exc:
+                    raise RuntimeRefusal('diagram_not_found', 404) from exc
+                if mode == 'revision':
+                    store.propose_diagram(task_id, kind, index, diagrams_of(content)[index],
+                                          diagrams_of(document['content'])[index], principal.identity)
+                    return dict(task_id=task_id, kind=kind, content_sha256=base_sha256, changed=content != document['content'], mode=mode)
+                if content == document['content']:
+                    return dict(task_id=task_id, kind=kind, content_sha256=base_sha256, changed=False, mode=mode)
+                sha = store.edit_document(document, index, content, principal.identity)
+                return dict(task_id=task_id, kind=kind, content_sha256=sha, changed=True, mode=mode)
+
+    def _sent_through(self, store, task_id):
+        """How far the owner's edits have been handed to the Programmer."""
+        sent = [d['payload'].get('revision', 0) for d in store.decisions(task_id) if d['gate'] == Gate.DESIGN and d['outcome'] == 'edits_sent']
+        return max(sent, default=0)
+
+    def design_edits(self, task_id):
+        """What the owner changed, how it can go on, and whether all of it fits the Programmer's input."""
+        with Database(self.settings.database) as db:
+            store = RunStore(db)
+            task, row = TaskEngine(db, ProjectRegistry(db)).get(task_id), store.latest(task_id)
+            mode, rows = self._edit_mode(store, task, row), store.documents(task_id)
+            if mode == 'revision':
+                titles = {d['kind']: d['title'] for d in rows}
+                items = [dict(kind=p['kind'], title=titles.get(p['kind'], p['kind']), edited_by=p['edited_by'], diagram=p['diagram'],
+                              source=p['source'], **line_changes(p['original'], p['source'])) for p in store.open_proposals(task_id)]
+                return dict(mode=mode, items=items, pending=bool(items), clipped=[], divided=False, observed_at=now())
+            items = []
+            for doc in rows:
+                original = store.original_of(task_id, doc['kind']) if doc['edited_by'] and doc['stage'] in DESIGN_STAGES else None
+                if original is not None:
+                    items += [dict(kind=doc['kind'], title=doc['title'], edited_by=doc['edited_by'], **change)
+                              for change in changed_diagrams(original, doc['content'])]
+            design = tuple(_stored(r) for r in rows if r['stage'] in DESIGN_STAGES)
+            # The smaller of the two inputs: a design divided into packages gets this much.
+            delivered = design_input(design, budget=INPUT_DESIGN_BYTES)
+            clipped = sorted({e['document'] for e in delivered['approved_design'] if e.get('owner_edited') and e['clipped']}
+                             | ({i['kind'] for i in items} & set(delivered['omitted_documents'])))
+            packages = store.work_packages(row['run_id']) if row else []
+            return dict(mode=mode, items=items, clipped=clipped, divided=bool(packages), observed_at=now(),
+                        pending=bool(items) and store.last_revision(task_id) > self._sent_through(store, task_id))
+
+    def send_design_edits(self, task_id, principal, note):
+        """Coding stopped short: it goes again on the changed design, recorded as a change to what was approved."""
+        with Database(self.settings.database) as db:
+            store, engine = RunStore(db), TaskEngine(db, ProjectRegistry(db))
+            task, row = engine.get(task_id), store.latest(task_id)
+            if self._edit_mode(store, task, row) != 'stopped':
+                raise RuntimeRefusal('design_not_pending')
+            if store.last_revision(task_id) <= self._sent_through(store, task_id):
+                raise RuntimeRefusal('no_design_edits')
+            titles = sorted({d['title'] for d in store.documents(task_id, row['run_id']) if d['edited_by'] and d['stage'] in DESIGN_STAGES})
+
+            def accepted(store):
+                self._decide(store, row['run_id'], task_id, Gate.DESIGN, 'edits_sent', principal.identity, reasons=[note] if note else [],
+                             payload=dict(revision=store.last_revision(task_id), documents=titles), evidence=store.documents_digest(row['run_id']))
+                store.restart_packages(row['run_id'])
+        message = f"Saya mengubah diagram di {', '.join(titles)}. Kerjakan ulang mengikuti diagram terbaru." + (f' {note}' if note else '')
+        return self.post_task_message(task_id, message, accepted=accepted, design_edit=True)
 
     def decide_design(self, task_id, principal, decision, reason):
         """The operator's gate between design and coding. Approving resumes the same run."""
@@ -1651,6 +1791,9 @@ class Runtime:
                 with db.transaction():
                     store.record_design_decision(row['run_id'], decision, reason, principal.identity)
                     store.update(row['run_id'], state='scheduled', phase='queued')
+                    if store.last_revision(task_id) > self._sent_through(store, task_id):
+                        self._decide(store, row['run_id'], task_id, Gate.DESIGN, 'edits_sent', principal.identity,
+                                     payload=dict(revision=store.last_revision(task_id)), evidence=store.documents_digest(row['run_id']))
                 self._pool.submit(self._work, row['run_id'], 'code')
             except BaseException:
                 self._busy.release()

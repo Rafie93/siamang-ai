@@ -147,7 +147,7 @@ and nothing else.
 | **Plan consistency** | `plan.unknown_step`: a change names a step not in the plan |
 | **Analysis consistency** | `analysis.plan_mismatch` (warning): the analysis was made against a different plan |
 | **Project consistency** | `project.before_hash_mismatch` (file changed since the proposal), `project.target_missing`, `project.create_target_exists`, `project.before_unverified` (inconclusive: proposal had no verified before-state), `project.state_unverified` (inconclusive: current state unreadable or existence unknown) |
-| **Scope** | `scope.outside_analysis` (warning): the path is outside every component location and cited path of the analysis. This is judged by names only and is never blocking |
+| **Scope** | `scope.outside_analysis` (warning): the path is outside every component location and cited path of the analysis, and is not a file the owner's specification or approved design names (`metadata.planned_paths`). This is judged by names only and is never blocking |
 
 The task-semantics question ("does this change implement the task?") is
 not answered. QA lists it under `not_verified` instead of claiming it.

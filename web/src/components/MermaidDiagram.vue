@@ -2,7 +2,12 @@
 import { onBeforeUnmount, ref, useId, watch } from 'vue'
 import { useTheme } from '@/composables/useTheme'
 
-const props = defineProps({ source: { type: String, required: true } })
+const props = defineProps({
+  source: { type: String, required: true },
+  // An editor's preview: a mistake keeps the last good picture on screen and is reported, not shown here.
+  live: { type: Boolean, default: false },
+})
+const emit = defineEmits(['result'])
 
 const { dark } = useTheme()
 const id = `mermaid-${useId()}`
@@ -32,14 +37,17 @@ const draw = async () => {
       },
     })
 
-    const result = await mermaid.render(id, props.source)
+    // Mermaid removes any element with the id it is given, which would take the picture on screen with it.
+    const result = await mermaid.render(`${id}-${request}`, props.source)
     if (request !== latest) return
     svg.value = result.svg
     failed.value = false
-  } catch {
+    emit('result', { source: props.source, error: '' })
+  } catch (e) {
     if (request !== latest) return
-    svg.value = ''
+    if (!props.live) svg.value = ''
     failed.value = true
+    emit('result', { source: props.source, error: e?.message || 'Diagram tidak bisa digambar.' })
   }
 }
 
@@ -52,6 +60,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="svg" class="mermaid-diagram" v-html="svg" />
+  <p v-else-if="failed && live" class="muted">Belum ada gambar: perbaiki kodenya dulu.</p>
   <div v-else-if="failed">
     <p class="muted small">Diagram ini tidak bisa digambar. Berikut sumbernya:</p>
     <pre class="code-block">{{ source }}</pre>

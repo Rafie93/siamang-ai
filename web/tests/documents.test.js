@@ -113,3 +113,27 @@ it('shows the lead waiting while a task needs answers', () => {
   expect(team.agents.amang.label).toBe('Menunggu jawaban Anda')
   expect(team.activeAgent).toBe(null)
 })
+
+it('refuses a malformed answer about diagram edits', () => {
+  expect(validResponse('/tasks/t/documents/erd/diagrams/0', 'POST', { changed: true })).toBe(false)
+  expect(
+    validResponse('/tasks/t/documents/erd/diagrams/0', 'POST', { changed: true, content_sha256: 'a' }),
+  ).toBe(true)
+  expect(validResponse('/tasks/t/document-edits', 'GET', { items: [] })).toBe(false)
+  expect(validResponse('/tasks/t/document-edits', 'GET', { items: [], clipped: [], divided: false })).toBe(
+    true,
+  )
+})
+
+it('reads both answers to sending changed diagrams', () => {
+  const send = '/tasks/t/design-edits/send'
+  expect(validResponse(send, 'POST', { mode: 'stopped', state: 'scheduled' })).toBe(true)
+  expect(validResponse(send, 'POST', { mode: 'stopped' })).toBe(false)
+  expect(
+    validResponse(send, 'POST', {
+      mode: 'revision',
+      task: { task_id: 't', status: 'queued', description: 'd' },
+    }),
+  ).toBe(true)
+  expect(validResponse(send, 'POST', { mode: 'revision' })).toBe(false)
+})

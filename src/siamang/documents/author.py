@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from siamang.documents.catalog import DocumentStatus, Source, Spec, specs_for
+from siamang.documents.diagrams import diagrams_of
 from siamang.models.errors import ModelError
 from siamang.models.request import GenerationOptions, ModelRequest, ResponseFormat
 from siamang.models.router import ModelRouter
@@ -27,7 +28,9 @@ PRIOR_CLIP = 4_000  # characters of each earlier document a later call is shown
 TRACKED_LIMIT = 400  # file names of the repository a design call is shown
 DESIGN_BUDGET_BYTES = 4_500  # the Loop refuses input above 8 KiB; the project spec takes the rest
 SPEC_BUDGET_BYTES = 2_000
-DESIGN_PRIORITY = ('acceptance_criteria', 'task_specification', 'technical_design', 'prd', 'api_spec', 'erd', 'srs')
+DESIGN_PRIORITY = ('acceptance_criteria', 'task_specification', 'technical_design', 'prd', 'api_spec', 'erd',
+                   'class_diagram', 'sequence_diagram', 'use_case_diagram', 'srs')
+OWNER_PRECEDENCE = 'Entries with owner_edited are diagrams the project owner changed by hand: where anything else disagrees, follow them.'
 
 SKILLS: Mapping[str, str] = {
     'lead': 'You are the Lead Agent, the project manager who receives the instruction and coordinates the team.',
@@ -47,6 +50,7 @@ RULES = (
     'Never claim that code was run, tested, or deployed. '
     'Colleagues write the other documents of this stage at the same time: write only the documents asked for, '
     'stay consistent with prior_documents, and do not repeat what they cover. '
+    'owner_diagrams in the context, when present, are diagrams the project owner drew by hand: stay consistent with them. '
     'When a document is genuinely irrelevant to this work, set applicable to false and give the reason '
     'instead of writing filler.'
 )
@@ -59,6 +63,7 @@ class Document:
     content: str = ''
     reason: str = ''
     model_id: str | None = None
+    edited_by: str | None = None  # the owner changed a diagram of it by hand
 
 
 def clip(text: str, limit: int = MAX_CONTEXT_TEXT) -> str:
@@ -223,18 +228,46 @@ def choose_files(router: ModelRouter | None, context: Mapping[str, Any], names: 
     return list(dict.fromkeys(f for f in rows or () if isinstance(f, str) and f in known))[:limit]
 
 
+def _fit(text: str, room: int) -> str:
+    """As much of the text as takes at most ``room`` bytes once it is JSON, where a newline or a quote costs two."""
+    text = text.encode()[:max(room, 0)].decode(errors='ignore')
+    while text and (size := len(json.dumps(text, ensure_ascii=False).encode())) > room:
+        text = text[:max(len(text) * room // size - 1, 0)]
+    return text
+
+
 def design_input(documents: tuple[Document, ...], budget: int = DESIGN_BUDGET_BYTES) -> dict[str, Any]:
-    """The approved design as data for the Programmer, most binding documents first, within its input limit."""
+    """The approved design as data for the Programmer, within its input limit.
+
+    What the owner edited comes first and may take two thirds of the room, so an edit always reaches the Programmer
+    and the most binding documents still fit. The prose around an edited diagram was written for the old diagram: it stays out.
+    """
     ready = {d.spec.kind: d.content for d in documents if d.status is DocumentStatus.GENERATED}
+    edited = {d.spec.kind: '\n\n'.join(diagrams_of(d.content)) for d in documents
+              if d.edited_by and d.status is DocumentStatus.GENERATED and diagrams_of(d.content)}
     design, omitted = [], []
-    for kind in sorted(ready, key=lambda k: DESIGN_PRIORITY.index(k) if k in DESIGN_PRIORITY else len(DESIGN_PRIORITY)):
-        room = budget - len(json.dumps(design, ensure_ascii=False).encode()) - 300
-        text = ready[kind].encode()[:max(room, 0)].decode(errors='ignore')
+
+    def rank(kind):
+        return DESIGN_PRIORITY.index(kind) if kind in DESIGN_PRIORITY else len(DESIGN_PRIORITY)
+
+    def size():
+        return len(json.dumps(design, ensure_ascii=False).encode())
+
+    if edited:
+        budget -= len(OWNER_PRECEDENCE)
+    for left, kind in zip(range(len(edited), 0, -1), sorted(edited, key=rank)):
+        text = _fit(edited[kind], (budget * 2 // 3 - size()) // left - 100)
+        if text:
+            design.append({'document': kind, 'text': text, 'clipped': len(text) < len(edited[kind]), 'owner_edited': True})
+        else:
+            omitted.append(kind)
+    for kind in sorted((k for k in ready if k not in edited), key=rank):
+        text = _fit(ready[kind], budget - size() - 300)
         if text:
             design.append({'document': kind, 'text': text, 'clipped': len(text) < len(ready[kind])})
         else:
             omitted.append(kind)
-    return {'approved_design': design, 'omitted_documents': omitted}
+    return {'approved_design': design, 'omitted_documents': omitted} | ({'design_precedence': OWNER_PRECEDENCE} if edited else {})
 
 
 def clip_bytes(text: str, limit: int = SPEC_BUDGET_BYTES) -> str:

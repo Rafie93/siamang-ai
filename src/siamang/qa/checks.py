@@ -22,7 +22,7 @@ from collections.abc import Iterable
 from types import MappingProxyType
 from typing import Any
 
-from siamang.analyst.analysis import SystemAnalysis
+from siamang.analyst.analysis import PLANNED_PATHS, SystemAnalysis
 from siamang.planner.plan import Plan
 from siamang.programmer.change import BeforeState, Operation, ProposedChange
 from siamang.programmer.errors import ChangeRejectedError, ProgrammingError
@@ -161,7 +161,9 @@ def check_plan(changes: Iterable[ProposedChange], plan: Plan, out: Findings) -> 
 
 
 def scope_roots(analysis: SystemAnalysis) -> tuple[frozenset[str], frozenset[str]]:
-    """(cited file paths, directories) the analysis points at. The project root alone is not a scope."""
+    """(cited file paths, directories) the analysis points at. The project root alone is not a scope.
+
+    A file the owner's documents name counts as that file alone: its directory is not opened to other files."""
     paths, dirs = set(), set()
     for c in analysis.components:
         if c.location != ".":
@@ -177,6 +179,11 @@ def scope_roots(analysis: SystemAnalysis) -> tuple[frozenset[str], frozenset[str
             paths.add(path)
             if "/" in path:
                 dirs.add(path.rsplit("/", 1)[0])
+    for line in analysis.metadata.get(PLANNED_PATHS, ()):
+        try:
+            paths.add(validate_path(line))
+        except ValueError:
+            continue
     return frozenset(paths), frozenset(dirs)
 
 

@@ -27,6 +27,8 @@ WATCHED_WRITES = (
     ('api_run_events', 'execution', _PROJECT_OF_TASK, 'NEW.task_id', 'NEW.position', ('INSERT',)),
     ('api_runs', 'reports', _PROJECT_OF_TASK, 'NEW.task_id', 'NULL', ('UPDATE OF bundle, report, decision',)),
     ('api_documents', 'documents', _PROJECT_OF_TASK, 'NEW.task_id', 'NULL', ('INSERT',)),
+    ('api_document_revisions', 'documents', _PROJECT_OF_TASK, 'NEW.task_id', 'NULL', ('INSERT',)),  # with every owner edit
+    ('api_diagram_proposals', 'documents', _PROJECT_OF_TASK, 'NEW.task_id', 'NULL', _WRITES),
     ('api_design_parts', 'task', _PROJECT_OF_RUN, _TASK_OF_RUN, 'NULL', _WRITES),
     ('api_work_packages', 'task', _PROJECT_OF_RUN, _TASK_OF_RUN, 'NULL', _WRITES),
     ('api_task_branches', 'task', 'NEW.project_id', 'NEW.task_id', 'NULL', _WRITES),
@@ -40,6 +42,11 @@ WATCHED_WRITES = (
     ('projects', 'project', 'NEW.project_id', 'NULL', 'NULL', _WRITES),
 )
 CHANGE_RETENTION = 10_000  # enough to resume after a dropped connection; further behind, a reader reloads instead
+
+
+# Whose edit produced exactly this text, so a retry that reuses the document keeps the mark and a model's rewrite loses it.
+_EDITED_BY = ('(SELECT r.edited_by FROM api_document_revisions r WHERE r.task_id=d.task_id AND r.kind=d.kind '
+              'AND r.content_sha256=d.content_sha256 AND r.diagram IS NOT NULL ORDER BY r.position DESC LIMIT 1) AS edited_by')
 
 
 class RunStore:
@@ -88,6 +95,23 @@ class RunStore:
             conn.execute('CREATE TABLE IF NOT EXISTS api_document_basis (run_id TEXT NOT NULL, kind TEXT NOT NULL, '
                          'basis TEXT NOT NULL, PRIMARY KEY (run_id, kind)) STRICT')
             conn.execute('CREATE INDEX IF NOT EXISTS api_task_documents ON api_documents(task_id)')
+            # What a document said before each change. ``diagram`` is the diagram the owner edited; NULL when a rewrite replaced their edit.
+            conn.execute('''CREATE TABLE IF NOT EXISTS api_document_revisions (
+                position INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, task_id TEXT NOT NULL, kind TEXT NOT NULL,
+                diagram INTEGER, previous_content TEXT NOT NULL, previous_sha256 TEXT NOT NULL, content_sha256 TEXT NOT NULL,
+                edited_by TEXT NOT NULL, edited_at TEXT NOT NULL) STRICT''')
+            conn.execute('CREATE INDEX IF NOT EXISTS api_document_revision_kinds ON api_document_revisions(task_id, kind)')
+            # A diagram changed on a published task: its documents are a record of what shipped, so the change waits here for a revision.
+            conn.execute('''CREATE TABLE IF NOT EXISTS api_diagram_proposals (
+                position INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, kind TEXT NOT NULL, diagram INTEGER NOT NULL,
+                source TEXT NOT NULL, original TEXT NOT NULL, edited_by TEXT NOT NULL, updated_at TEXT NOT NULL, revision_task_id TEXT) STRICT''')
+            conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS api_open_diagram_proposals ON api_diagram_proposals(task_id, kind, diagram) '
+                         'WHERE revision_task_id IS NULL')
+            conn.execute('CREATE INDEX IF NOT EXISTS api_revision_diagrams ON api_diagram_proposals(revision_task_id)')
+            conn.execute('''CREATE TRIGGER IF NOT EXISTS api_document_revisions_no_update
+                BEFORE UPDATE ON api_document_revisions BEGIN SELECT RAISE(ABORT, 'append only'); END''')
+            conn.execute('''CREATE TRIGGER IF NOT EXISTS api_document_revisions_no_delete
+                BEFORE DELETE ON api_document_revisions BEGIN SELECT RAISE(ABORT, 'append only'); END''')
             conn.execute('''CREATE TABLE IF NOT EXISTS api_project_repos (
                 project_id TEXT PRIMARY KEY, repository TEXT NOT NULL, default_branch TEXT, private INTEGER,
                 state TEXT NOT NULL, error TEXT, updated_at TEXT NOT NULL) STRICT''')
@@ -219,20 +243,81 @@ class RunStore:
     def save_documents(self, run_id, task_id, documents, basis=''):
         with self.db.transaction() as conn:
             for d in documents:
-                # A rerun after the owner's answer replaces what the earlier attempt recorded.
+                # A rerun after the owner's answer replaces what the earlier attempt recorded, but never loses an owner's edit.
+                sha = hashlib.sha256(d.content.encode()).hexdigest()
+                replaced = conn.execute(f'SELECT d.*, {_EDITED_BY} FROM api_documents d WHERE d.run_id=? AND d.kind=?',
+                                        (run_id, d.spec.kind)).fetchone()
+                if replaced and replaced['edited_by'] and replaced['content_sha256'] != sha:
+                    conn.execute('INSERT INTO api_document_revisions(run_id,task_id,kind,diagram,previous_content,previous_sha256,'
+                                 'content_sha256,edited_by,edited_at) VALUES (?,?,?,NULL,?,?,?,?,?)',
+                                 (run_id, task_id, d.spec.kind, replaced['content'], replaced['content_sha256'], sha, 'system', now()))
                 conn.execute('DELETE FROM api_documents WHERE run_id=? AND kind=?', (run_id, d.spec.kind))
                 conn.execute('INSERT INTO api_documents VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                              (new_id('document'), run_id, task_id, d.spec.agent, d.spec.stage, d.spec.kind,
                               d.spec.title, str(d.spec.source), str(d.status), d.content,
-                              hashlib.sha256(d.content.encode()).hexdigest(), d.reason, d.model_id, now()))
+                              sha, d.reason, d.model_id, now()))
                 conn.execute('DELETE FROM api_document_basis WHERE run_id=? AND kind=?', (run_id, d.spec.kind))
                 if basis and str(d.status) == 'generated':
                     conn.execute('INSERT INTO api_document_basis VALUES (?,?,?)', (run_id, d.spec.kind, basis))
 
     def documents(self, task_id, run_id=None):
         run_id = run_id or (self.latest(task_id) or {}).get('run_id')
-        rows = self.db.conn.execute('SELECT * FROM api_documents WHERE run_id=? ORDER BY rowid', (run_id,)).fetchall()
+        rows = self.db.conn.execute(f'SELECT d.*, {_EDITED_BY} FROM api_documents d WHERE d.run_id=? ORDER BY d.rowid',
+                                    (run_id,)).fetchall()
         return [dict(r) for r in rows]
+
+    def edit_document(self, document, diagram, content, actor):
+        """The owner's edit of one diagram. The caller holds the transaction that checked the design is still at its gate."""
+        sha = hashlib.sha256(content.encode()).hexdigest()
+        self.db.conn.execute('INSERT INTO api_document_revisions(run_id,task_id,kind,diagram,previous_content,previous_sha256,'
+                             'content_sha256,edited_by,edited_at) VALUES (?,?,?,?,?,?,?,?,?)',
+                             (document['run_id'], document['task_id'], document['kind'], diagram, document['content'],
+                              document['content_sha256'], sha, actor, now()))
+        self.db.conn.execute("UPDATE api_documents SET content=?, content_sha256=?, status='generated', reason='' WHERE run_id=? AND kind=?",
+                             (content, sha, document['run_id'], document['kind']))
+        return sha
+
+    def last_revision(self, task_id):
+        row = self.db.conn.execute('SELECT MAX(position) AS position FROM api_document_revisions WHERE task_id=? AND diagram IS NOT NULL',
+                                   (task_id,)).fetchone()
+        return row['position'] or 0
+
+    def propose_diagram(self, task_id, kind, diagram, source, original, actor):
+        """Writing the original back withdraws the proposal: nothing is left to revise."""
+        self.db.conn.execute('DELETE FROM api_diagram_proposals WHERE task_id=? AND kind=? AND diagram=? AND revision_task_id IS NULL',
+                             (task_id, kind, diagram))
+        if source != original:
+            self.db.conn.execute('INSERT INTO api_diagram_proposals(task_id,kind,diagram,source,original,edited_by,updated_at) '
+                                 'VALUES (?,?,?,?,?,?,?)', (task_id, kind, diagram, source, original, actor, now()))
+
+    def open_proposals(self, task_id):
+        return [dict(r) for r in self.db.conn.execute(
+            'SELECT * FROM api_diagram_proposals WHERE task_id=? AND revision_task_id IS NULL ORDER BY position', (task_id,))]
+
+    def take_proposals(self, task_id, revision_task_id):
+        self.db.conn.execute('UPDATE api_diagram_proposals SET revision_task_id=? WHERE task_id=? AND revision_task_id IS NULL',
+                             (revision_task_id, task_id))
+
+    def diagrams_for_revision(self, revision_task_id):
+        return [dict(r) for r in self.db.conn.execute(
+            'SELECT * FROM api_diagram_proposals WHERE revision_task_id=? ORDER BY kind, diagram', (revision_task_id,))]
+
+    def restart_packages(self, run_id):
+        """The design changed, so what passed was built on the old one: every package is worked again."""
+        conn = self.db.conn
+        conn.execute("DELETE FROM api_work_packages WHERE run_id=? AND kind='fix'", (run_id,))
+        conn.execute("UPDATE api_work_packages SET state='pending', phase=NULL, iteration=NULL, summary=NULL, questions=NULL, "
+                     'error=NULL, patch=NULL, attempt=1, updated_at=? WHERE run_id=?', (now(), run_id))
+
+    def original_of(self, task_id, kind):
+        """The document as it was before the owner's run of edits, which a model's rewrite ends."""
+        original = None
+        for row in self.db.conn.execute('SELECT diagram, previous_content FROM api_document_revisions WHERE task_id=? AND kind=? '
+                                        'ORDER BY position DESC', (task_id, kind)):
+            if row['diagram'] is None:
+                break
+            original = row['previous_content']
+        return original
 
     def start_part(self, run_id, stage, part, attempt, kinds, timeout_secs):
         """One model call of a stage has begun. Its row is the evidence of what ran, when, and for how long."""

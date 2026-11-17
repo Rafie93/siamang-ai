@@ -97,3 +97,33 @@ describe('MermaidDiagram', () => {
     setThemeMode('light')
   })
 })
+
+describe('editable diagrams', () => {
+  const TEXT =
+    '```python\nprint(1)\n```\n\n```mermaid\nflowchart TD\n  A --> B\n```\n\nTengah\n\n```MERMAID\nkedua\n```'
+  it('offers no edit unless the page says so', () => {
+    expect(
+      mount(MarkdownText, { props: { text: TEXT } })
+        .find('.diagram-block')
+        .exists(),
+    ).toBe(false)
+  })
+  it('offers a proposed diagram in place of what the document says', async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: TEXT, editableDiagrams: true, diagramOverrides: { 1: 'usulan' } },
+    })
+    await wrapper.findAll('.diagram-block button')[1].trigger('click')
+    expect(wrapper.emitted('edit-diagram')).toEqual([[{ index: 1, source: 'usulan' }]])
+  })
+  it('numbers diagrams past other code blocks, as the backend does', async () => {
+    const wrapper = mount(MarkdownText, { props: { text: TEXT, editableDiagrams: true } })
+    const buttons = wrapper.findAll('.diagram-block button')
+    expect(buttons).toHaveLength(2)
+    await buttons[1].trigger('click')
+    await buttons[0].trigger('click')
+    expect(wrapper.emitted('edit-diagram')).toEqual([
+      [{ index: 1, source: 'kedua' }],
+      [{ index: 0, source: 'flowchart TD\n  A --> B' }],
+    ])
+  })
+})

@@ -33,7 +33,13 @@ export const ERROR_TEXT = {
   programmer_change_rejected: 'Perubahan dari Programmer tidak lolos pemeriksaan.',
   patch_stale: 'File di repo sudah berubah sejak patch dibuat.',
   redivide_failed: 'Pembagian kerja belum bisa diulang. Coba lagi.',
-  design_not_pending: 'Desain ini sedang tidak menunggu persetujuan.',
+  design_not_pending: 'Diagram task ini sedang tidak bisa diubah.',
+  document_changed:
+    'Dokumen ini sudah berubah sejak editor dibuka. Salin kode Anda, tutup editor, lalu buka lagi.',
+  diagram_invalid: 'Kode diagram tidak bisa disimpan: kosong, terlalu panjang, atau memuat baris ```.',
+  diagram_not_found: 'Diagram ini tidak ditemukan di dokumen.',
+  no_design_edits: 'Tidak ada perubahan diagram yang belum dikirim.',
+  diagram_save_failed: 'Diagram gagal disimpan. Coba lagi.',
   push_failed: 'Push ke GitHub gagal.',
   pull_request_failed: 'Commit sudah terkirim, tetapi PR gagal dibuka.',
 }

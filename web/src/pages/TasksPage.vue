@@ -1,4 +1,5 @@
 <script setup>
+import DesignEditsNotice from '@/components/DesignEditsNotice.vue'
 import { ArrowUpRight } from '@lucide/vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import ConversationThread from '@/components/ConversationThread.vue'
@@ -243,6 +244,7 @@ watch(
       </div>
     </form>
 
+    <DesignEditsNotice class="mt mb" />
     <AppAlert
       v-if="office.designPending"
       role="status"
@@ -250,10 +252,13 @@ watch(
       class="mt mb"
       title="Desain menunggu persetujuan Anda"
     >
-      <p>Periksa PRD, SRS, dan dokumen lainnya. Coding baru dimulai setelah disetujui.</p>
+      <p>
+        Periksa PRD, SRS, dan dokumen lainnya, dan edit diagramnya bila perlu. Coding baru dimulai setelah
+        disetujui.
+      </p>
       <div class="row">
-        <AppButton variant="secondary" @click="office.showDocuments('planner')">
-          Baca dokumen desain <ArrowUpRight :size="14" />
+        <AppButton variant="secondary" @click="office.showDocuments('analyst')">
+          Baca atau edit desain <ArrowUpRight :size="14" />
         </AppButton>
         <AppButton
           :disabled="!office.can('approve')"

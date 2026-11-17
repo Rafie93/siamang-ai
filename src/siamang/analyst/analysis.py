@@ -34,6 +34,7 @@ NOTES_MAX = 50
 MAX_FINDINGS_LIMIT = 200
 MAX_COMPONENTS_LIMIT = 100
 MAX_OUTPUT_LIMIT = 512 * 1024
+PLANNED_PATHS = "planned_paths"  # metadata key: files the owner's specification or approved design names
 
 
 def _notes(values: Any, name: str) -> tuple[str, ...]:

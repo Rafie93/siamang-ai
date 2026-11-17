@@ -404,3 +404,19 @@ def test_policy_bounds_are_refusals(setup, clean):
     patch, qa = clean
     assert refused(setup, patch, qa, policy=ReviewerPolicy(max_changes=1)) is C.POLICY_DENIED
     assert refused(setup, patch, qa, policy=ReviewerPolicy(max_total_bytes=10)) is C.POLICY_DENIED
+
+
+def test_a_file_the_owner_named_clears_scope_alignment_and_type_and_stays_rederivable(setup):
+    from siamang.api.parallel import with_planned_paths
+    from siamang.reviewer.checks import judge
+
+    named = dataclasses.replace(setup, analysis=with_planned_paths(setup.analysis, ["Simpan di `data/publications.json`."]))
+    patch = direct(named, create("data/publications.json", "[]\n"))
+    qa = verify(named, patch)
+    r = review(named, patch, qa)
+    assert "scope.outside_analysis" not in {f.code for f in qa.findings}
+    assert not codes(r) & {"qa.warnings_open", "alignment.unrelated_change", "alignment.unrelated_patch",
+                           "consistency.unfamiliar_file_type"}
+    # the approval check judges again from the recorded analysis and must reach the same findings
+    again = judge(patch.changes, named.plan, named.analysis, qa, ReviewerPolicy())
+    assert [f.to_dict() for f in again] == [f.to_dict() for f in r.findings]

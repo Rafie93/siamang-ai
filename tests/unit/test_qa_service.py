@@ -4,6 +4,7 @@ import dataclasses
 
 import pytest
 
+from siamang.api.parallel import named_paths, with_planned_paths
 from siamang.programmer import Patch, ProposedChange
 from siamang.qa import QAPolicy, QAService, QAStatus
 from siamang.qa.errors import QAError, QAErrorCode
@@ -235,6 +236,22 @@ def test_scope_outside_analysis_is_a_warning(setup):
     r = verify(setup, p)
     out = [f for f in r.findings if f.code == "scope.outside_analysis"]
     assert [f.path for f in out] == ["docs/guide.md"] and r.status is QAStatus.PASS  # reported, not blocking
+
+
+def test_a_file_the_owner_named_is_in_scope_alone(setup):
+    p = propose(setup, [change("data/publications.json", "create", "[]\n"), change("data/other.json", "create", "[]\n"), change()])
+    analysis = with_planned_paths(setup.analysis, ["Simpan di `data/publications.json`, lihat https://example.com/x.json."])
+    r = verify(setup, p, analysis=analysis)
+    assert [f.path for f in r.findings if f.code == "scope.outside_analysis"] == ["data/other.json"]
+
+
+def test_named_paths_reads_file_names_and_nothing_else():
+    text = "Lihat `data/projects.json`, ./js/app.js dan index.html. Bukan https://a.io/b.html, a@b.com, atau v1.2."
+    assert named_paths([text, "index.html lagi", None]) == ("data/projects.json", "js/app.js", "index.html")
+
+
+def test_no_named_path_leaves_the_analysis_untouched(setup):
+    assert with_planned_paths(setup.analysis, ["tanpa nama file"]) is setup.analysis
 
 
 # --- input refusals -------------------------------------------------------------------------

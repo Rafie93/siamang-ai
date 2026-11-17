@@ -16,6 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from siamang import __version__
 from siamang.approval.errors import ApprovalError
 from siamang.documents.catalog import CATALOG
+from siamang.documents.diagrams import MAX_DIAGRAM_CHARS
+from siamang.ids import new_id
 from siamang.jsondata import thaw
 from siamang.log import redact
 from siamang.projects import ProjectRegistry
@@ -63,6 +65,17 @@ class NewDraft(BaseModel):
     priority: Literal['low', 'normal', 'high', 'urgent'] = 'normal'
     feature_id: str | None = None
     revises_task_id: str | None = None
+
+
+class DiagramEdit(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    source: str = Field(min_length=1, max_length=MAX_DIAGRAM_CHARS)
+    base_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+class SendEdits(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    note: str | None = Field(default=None, max_length=300)
 
 
 class DecisionBody(BaseModel):
@@ -499,6 +512,53 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
     async def documents(task_id: str, principal=Depends(permission('read')), db=Depends(database)):
         scoped_task(db, task_id, principal)
         return {'items': public(RunStore(db).documents(task_id)), 'observed_at': now()}
+
+    @app.post('/v0/tasks/{task_id}/documents/{kind}/diagrams/{index}')
+    async def edit_diagram(task_id: str, kind: str, index: int, body: DiagramEdit, principal=Depends(permission('approve')),
+                           db=Depends(database)):
+        scoped_task(db, task_id, principal)
+        return runtime.edit_diagram(task_id, principal, kind, index, body.source, body.base_sha256)
+
+    @app.get('/v0/tasks/{task_id}/document-edits')
+    async def document_edits(task_id: str, principal=Depends(permission('read')), db=Depends(database)):
+        scoped_task(db, task_id, principal)
+        return public(runtime.design_edits(task_id))
+
+    @app.post('/v0/tasks/{task_id}/design-edits/send', status_code=202)
+    async def send_design_edits(task_id: str, body: SendEdits, principal=Depends(permission('approve')), db=Depends(database)):
+        """The owner's question answered yes: a stopped run goes again, and a shipped task gets a revision."""
+        task, note = scoped_task(db, task_id, principal), (body.note or '').strip()
+        mode = runtime.edit_mode(task_id)
+        if mode == 'stopped':
+            return runtime.send_design_edits(task_id, principal, note) | {'mode': mode}
+        if mode != 'revision':
+            raise RuntimeRefusal('design_not_pending')
+        if 'submit' not in principal.permissions:
+            raise RuntimeRefusal('forbidden', 403)
+        store = RunStore(db)
+        with db.transaction():
+            proposals = store.open_proposals(task_id)
+            if not proposals:
+                raise RuntimeRefusal('no_design_edits')
+            titles = {d['kind']: d['title'] for d in store.documents(task_id)}
+            changed = ', '.join(dict.fromkeys(titles.get(p['kind'], p['kind']) for p in proposals))
+            base = task.title or task.description
+            submission = create_task(db, store, Submit(
+                project_id=task.project_id, request_id=new_id('request'), revises_task_id=task_id,
+                title=f'Revisi diagram: {base}'[:120],
+                description=(f'Revisi hasil task "{base[:300]}" mengikuti diagram yang diubah pemilik proyek: {changed}. '
+                             f'Ubah kode seperlunya agar sesuai dengan diagram tersebut. {note}').strip()))
+            store.take_proposals(task_id, submission.task.task_id)
+        scheduled, reason = False, None
+        if 'run' not in principal.permissions:
+            reason = 'forbidden'
+        else:
+            try:
+                runtime.schedule(submission.task.task_id)
+                scheduled = True
+            except RuntimeRefusal as exc:  # the task exists: it can still be started from the task list
+                reason = exc.code
+        return {'mode': mode, 'task': public(submission.task.to_dict()), 'scheduled': scheduled, 'reason': reason, 'observed_at': now()}
 
     @app.post('/v0/tasks/{task_id}/design-decision')
     async def design_decision(task_id: str, body: DecisionBody, principal=Depends(permission('approve')),

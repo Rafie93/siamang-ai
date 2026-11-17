@@ -11,6 +11,12 @@ export function validResponse(path, method, data) {
       return task(data.task) && typeof data.duplicate === 'boolean' && data.scheduled === false
     if (route.endsWith('/design-decision'))
       return typeof data.run_id === 'string' && ['approve', 'reject'].includes(data.decision)
+    if (route.endsWith('/design-edits/send'))
+      return data.mode === 'revision'
+        ? task(data.task)
+        : data.mode === 'stopped' && data.state === 'scheduled'
+    if (/\/diagrams\/\d+$/.test(route))
+      return typeof data.content_sha256 === 'string' && typeof data.changed === 'boolean'
     if (route.endsWith('/features'))
       return typeof data.feature_id === 'string' && typeof data.title === 'string'
     if (route === '/projects') return typeof data.project_id === 'string' && typeof data.name === 'string'
@@ -71,6 +77,13 @@ export function validResponse(path, method, data) {
           !!p.waiting &&
           Array.isArray(p.features),
       )
+    )
+  if (route.endsWith('/document-edits'))
+    return (
+      Array.isArray(data.items) &&
+      Array.isArray(data.clipped) &&
+      typeof data.divided === 'boolean' &&
+      data.items.every(e => typeof e.kind === 'string' && Number.isInteger(e.diagram))
     )
   if (route.endsWith('/documents'))
     return (

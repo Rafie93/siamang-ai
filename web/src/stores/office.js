@@ -53,6 +53,8 @@ export const useOfficeStore = defineStore('office', () => {
     filter = ref(''),
     offset = ref(0),
     confirm = ref(null),
+    designEdits = ref(null),
+    designEditsLoading = ref(false),
     reason = ref('')
   const clock = ref(Date.now())
   let freshnessTimer
@@ -287,6 +289,7 @@ export const useOfficeStore = defineStore('office', () => {
     () =>
       selected.value?.status === 'waiting' && selected.value?.execution?.wait_reason === 'design_approval',
   )
+  const editMode = computed(() => designEdits.value?.mode ?? (designPending.value ? 'gate' : null))
   function showDocuments(officeId) {
     documentAgent.value = documentAgentFor(officeId) || 'lead'
     documentKinds.value = []
@@ -430,6 +433,7 @@ export const useOfficeStore = defineStore('office', () => {
     stream = null,
     frameTimer,
     frameScopes = new Set()
+  let lastEditState = ''
   const eventCursors = new Map() // how far the route has been read for each task; stream events never move this
   const status = computed(() => {
     void clock.value
@@ -542,6 +546,17 @@ export const useOfficeStore = defineStore('office', () => {
             if (r) reports.value = items(r)
             if (e) events.value = mergeEvents(knownEvents(events.value, taskId), e)
             if (d) documents.value = items(d)
+            // Whether a diagram can be edited follows the task's state too, which a new stage does not change.
+            const editState = [
+              selected.value?.status,
+              selected.value?.execution?.wait_reason,
+              selected.value?.branch?.publication,
+            ].join()
+            if (d || editState !== lastEditState) {
+              lastEditState = editState
+              const edits = await request('/tasks/' + taskId + '/document-edits').catch(() => null)
+              if (taskId === selectedId.value) designEdits.value = edits
+            }
           }
         }
       }
@@ -715,6 +730,34 @@ export const useOfficeStore = defineStore('office', () => {
   function ask(action, id) {
     confirm.value = { action, id }
     reason.value = ''
+    if (action === 'design-approve' || action === 'design-send') loadDesignEdits(id)
+  }
+  // The question before coding names what the owner changed, so it waits for this answer.
+  async function loadDesignEdits(id) {
+    designEditsLoading.value = true
+    try {
+      const edits = await request('/tasks/' + id + '/document-edits')
+      if (selectedId.value === id) designEdits.value = edits
+    } catch {
+      if (selectedId.value === id)
+        designEdits.value = { items: [], clipped: [], divided: false, ...designEdits.value, failed: true }
+    } finally {
+      designEditsLoading.value = false
+    }
+  }
+  /** Throws the backend's refusal: the editor stays open, with the owner's text, and says why. */
+  async function saveDiagram(kind, index, source, baseSha256) {
+    busy.value = true
+    try {
+      await post(`/tasks/${selectedId.value}/documents/${kind}/diagrams/${index}`, {
+        source,
+        base_sha256: baseSha256,
+      })
+      notice.value = 'Diagram disimpan. Versi sebelumnya tetap tercatat.'
+    } finally {
+      busy.value = false
+    }
+    await refresh()
   }
   async function act() {
     const { action, id } = confirm.value
@@ -728,14 +771,32 @@ export const useOfficeStore = defineStore('office', () => {
           decision: action === 'design-approve' ? 'approve' : 'reject',
           reason: reason.value || undefined,
         })
-      else await post('/tasks/' + id + '/' + action)
+      else if (action === 'design-send') {
+        const sent = await post('/tasks/' + id + '/design-edits/send', { note: reason.value || undefined })
+        if (sent.mode === 'revision') {
+          selectedId.value = sent.task.task_id
+          resetTask()
+          go('tasks')
+        }
+        notice.value =
+          sent.mode !== 'revision'
+            ? 'Diagram dikirim. Programmer mengerjakan ulang.'
+            : sent.scheduled
+              ? 'Task revisi dibuat dan tim mulai bekerja. Diagram Anda dipakai di desainnya.'
+              : 'Task revisi dibuat, tetapi belum berjalan: ' + errorText(sent.reason)
+        confirm.value = null
+        await refresh()
+        return
+      } else await post('/tasks/' + id + '/' + action)
       notice.value =
         action === 'approve'
           ? selected.value?.branch
             ? 'Proposal disetujui. Siamang membuat commit dan membuka PR.'
             : 'Proposal disetujui. Patch tidak diterapkan.'
           : action === 'design-approve'
-            ? 'Desain disetujui. Programmer mulai bekerja.'
+            ? designEdits.value?.items?.length
+              ? 'Desain dan diagram yang Anda ubah dikirim. Programmer mulai bekerja.'
+              : 'Desain disetujui. Programmer mulai bekerja.'
             : action === 'design-reject'
               ? 'Desain ditolak. Task dibatalkan.'
               : 'Backend mengonfirmasi aksi ' + action
@@ -753,6 +814,7 @@ export const useOfficeStore = defineStore('office', () => {
       : '—'
   }
   function resetTask() {
+    designEdits.value = null
     selected.value = null
     reports.value = []
     events.value = []
@@ -812,6 +874,10 @@ export const useOfficeStore = defineStore('office', () => {
   }
   return {
     redivide,
+    saveDiagram,
+    designEdits,
+    designEditsLoading,
+    editMode,
     startRevision,
     feed,
     stagePin,
