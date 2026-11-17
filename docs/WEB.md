@@ -59,3 +59,9 @@ Geometri unit bersama (box/sphere/cylinder) diskalakan per mesh, material di-cac
 ## Data lokal
 
 Database, kunci segel, dan clone proyek ada di `~/.siamang/web`, atau di folder yang ditunjuk `WEB_DATA`. Folder ini sengaja di luar repo: proyek tidak boleh berada di dalam repo Siamang sendiri (lihat [GIT_WORKSPACE.md](GIT_WORKSPACE.md#8-protected-repositories-architecture-6)).
+
+## Akun (Settings → Akun)
+
+- **GitHub.** Pemilik menempel personal access token (`ghp_…` / `github_pat_…`, scope `repo`, `read:org`, `workflow`). Server memeriksanya dengan `gh api user`, lalu menyimpannya di `~/.config/siamang/github-token` (0600). Sejak itu clone, push, PR, dan CI memakai token itu sebagai `GH_TOKEN`. Login gh pribadi pemilik (folder config dan Keychain) tidak disentuh, dan menjadi cadangan bila token diputuskan.
+- **Claude.** Tombol login menjalankan `claude auth login --claudeai` di komputer server, dan browser terbuka di sana. Halaman memeriksa `claude auth status` tiap 2 detik sampai selesai, dengan tautan cadangan kalau browser tidak terbuka. Bila claude.ai menampilkan **Kode autentikasi**, pemilik menempelnya di kolom yang muncul, dan server mengetikkannya ke proses login yang sedang menunggu. Tidak ada tombol logout, karena login ini sama dengan Claude Code pemilik.
+- Token tidak pernah dikirim balik ke browser. Route-nya ada di [HTTP_API.md](HTTP_API.md).

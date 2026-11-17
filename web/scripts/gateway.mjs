@@ -3,12 +3,12 @@ import { once } from 'node:events'
 const STREAM = '/v0/stream'
 export function permitted(method, path) {
   if (method === 'GET')
-    return /^\/v0\/(health|capabilities|stream|settings\/(models|documents)|openapi\.json|portfolio|office|projects(?:\/prj_[A-Za-z0-9]+(?:\/(features|intake|usage|drafts(?:\/dft_[A-Za-z0-9]+)?|agents\/[a-z]+\/chat))?)?|tasks(?:\/tsk_[A-Za-z0-9]+(?:\/(events|execution-events|reports|documents|document-edits|messages|usage|agents\/[a-z]+\/chat))?)?|approvals)$/.test(
+    return /^\/v0\/(health|capabilities|stream|settings\/(models|documents|github|claude)|openapi\.json|portfolio|office|projects(?:\/prj_[A-Za-z0-9]+(?:\/(features|intake|usage|drafts(?:\/dft_[A-Za-z0-9]+)?|agents\/[a-z]+\/chat))?)?|tasks(?:\/tsk_[A-Za-z0-9]+(?:\/(events|execution-events|reports|documents|document-edits|messages|usage|agents\/[a-z]+\/chat))?)?|approvals)$/.test(
       path,
     )
   return (
     method === 'POST' &&
-    /^\/v0\/(settings\/(models|documents)|tasks(?:\/tsk_[A-Za-z0-9]+\/(run|cancel|retry|design-decision|work-division|messages|agents\/[a-z]+\/chat|publish|design-edits\/send|documents\/[a-z_]+\/diagrams\/\d+))?|projects(?:\/prj_[A-Za-z0-9]+\/(features|clone|intake\/messages|intake\/approve|agents\/[a-z]+\/chat|drafts(?:\/dft_[A-Za-z0-9]+\/(messages|confirm|discard))?))?|approvals\/req_[A-Za-z0-9]+)$/.test(
+    /^\/v0\/(settings\/(models|documents|github|github\/disconnect|claude\/login|claude\/code)|tasks(?:\/tsk_[A-Za-z0-9]+\/(run|cancel|retry|design-decision|work-division|messages|agents\/[a-z]+\/chat|publish|design-edits\/send|documents\/[a-z_]+\/diagrams\/\d+))?|projects(?:\/prj_[A-Za-z0-9]+\/(features|clone|intake\/messages|intake\/approve|agents\/[a-z]+\/chat|drafts(?:\/dft_[A-Za-z0-9]+\/(messages|confirm|discard))?))?|approvals\/req_[A-Za-z0-9]+)$/.test(
       path,
     )
   )

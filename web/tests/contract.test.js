@@ -45,3 +45,17 @@ it('accepts a chat with one agent only in its own shape', () => {
     validResponse('/tasks/tsk_x/agents/designer/chat', 'POST', { agent: 'designer', state: 'scheduled' }),
   ).toBe(false)
 })
+it('checks the account shapes and never needs a token in them', () => {
+  const github = { installed: true, connected: true, stored: true, source: 'siamang', login: 'a', name: null }
+  expect(validResponse('/settings/github', 'GET', github)).toBe(true)
+  expect(validResponse('/settings/github', 'POST', github)).toBe(true)
+  expect(validResponse('/settings/github/disconnect', 'POST', { ...github, source: 'gh' })).toBe(true)
+  expect(validResponse('/settings/github', 'GET', { ...github, source: 'token' })).toBe(false)
+  expect(validResponse('/settings/github', 'GET', { connected: true })).toBe(false)
+  const claude = { installed: true, logged_in: false, login: { state: 'waiting', url: null } }
+  expect(validResponse('/settings/claude', 'GET', claude)).toBe(true)
+  expect(validResponse('/settings/claude/login', 'POST', claude)).toBe(true)
+  expect(validResponse('/settings/claude/code', 'POST', claude)).toBe(true)
+  expect(validResponse('/settings/claude', 'GET', { ...claude, login: { state: 'x' } })).toBe(false)
+  expect(validResponse('/settings/claude', 'GET', { installed: true, logged_in: true })).toBe(false)
+})

@@ -1,13 +1,21 @@
 // Words for the owner. Backend codes stay in the API; nothing here decides anything.
 export const ERROR_TEXT = {
   invalid_repository: 'Alamat repo tidak dikenali. Pakai bentuk https://github.com/pemilik/nama-repo.',
-  repository_not_found: 'Repo tidak ditemukan, atau akun gh Anda tidak punya akses ke repo itu.',
+  repository_not_found:
+    'Repo tidak ditemukan, atau akun GitHub yang terhubung tidak punya akses ke repo itu. Periksa di Settings → Akun.',
   repository_not_writable:
-    'Akun gh Anda hanya bisa membaca repo ini, jadi Siamang tidak bisa membuat branch di sana.',
+    'Akun GitHub yang terhubung hanya bisa membaca repo ini, jadi Siamang tidak bisa membuat branch di sana.',
   repository_not_empty: 'Repo sudah berisi branch saat hendak diberi commit pertama. Coba clone lagi.',
   repository_timeout: 'GitHub terlalu lama merespons. Coba lagi.',
-  clone_failed: 'Clone repo gagal. Periksa koneksi dan login gh Anda.',
-  gh_not_installed: 'Perintah gh tidak ditemukan di komputer ini.',
+  clone_failed: 'Clone repo gagal. Periksa koneksi dan akun GitHub di Settings → Akun.',
+  gh_not_installed: 'Perintah gh tidak ditemukan di komputer ini. Pasang GitHub CLI dulu.',
+  github_token_invalid:
+    'Token GitHub ditolak. Pastikan token masih berlaku dan diawali ghp_ atau github_pat_.',
+  claude_not_installed: 'Perintah claude tidak ditemukan di komputer ini. Pasang Claude Code dulu.',
+  claude_login_running: 'Login Claude masih berjalan. Selesaikan di browser yang terbuka.',
+  claude_code_invalid: 'Kode autentikasi tidak dikenali. Salin ulang seluruh kode dari claude.ai.',
+  claude_login_not_running: 'Login Claude sudah tidak menunggu kode. Klik Login Claude lagi.',
+  claude_login_failed: 'Login Claude tidak selesai: dibatalkan atau lewat 5 menit. Coba lagi.',
   git_not_installed: 'Perintah git tidak ditemukan di komputer ini.',
   interrupted: 'Terputus karena server dimatikan. Kirim lagi untuk melanjutkan.',
   lead_has_no_model: 'Lead belum diberi model. Pilih di halaman Settings.',

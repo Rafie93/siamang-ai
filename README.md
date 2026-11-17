@@ -24,6 +24,7 @@
 
 <p align="center">
   <a href="#overview">Overview</a> ·
+  <a href="#the-team">The Team</a> ·
   <a href="#demo">Demo</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="#web-interface">Web Interface</a> ·
@@ -44,9 +45,31 @@ It stands alone: no external control plane, and the core uses nothing beyond the
 > [!IMPORTANT]
 > **v0.3.0 is early.** Siamang runs locally for one operator and is not ready for the internet. Full autonomy is still in progress. In the default configuration two gates need your approval and Siamang does not run project code, so test results come only from GitHub CI. See [Features](#features).
 
+## The Team
+
+Seven agents, each with its own desk in the 3D office and its own set of documents. The order between them is decided by code, not by a model.
+
+| # | Agent | Role | What it produces |
+|---|---|---|---|
+| 1 | **Amang** | Lead | Reads the repository, asks you questions, writes the brief and task specification, assigns work, reports status |
+| 2 | **Planner** | Planning | PRD, roadmap, WBS, task list, priorities, complexity, dependencies, acceptance criteria |
+| 3 | **Architect** | System analyst | SRS, architecture, use case, class, ERD and sequence diagrams, API specification, technical design, work packages |
+| 4 | **Designer** | UI/UX | Design tokens, HTML wireframes per screen, screen specification, user flow, sitemap, accessibility |
+| 5 | **Programmer** | Coding | Source code, file structure, migrations, first unit tests, the patch |
+| 6 | **QA** | Quality | Test plan and cases, test results, coverage, bug report, the QA verdict |
+| 7 | **Reviewer** | Code review | Review report, architecture compliance, security, performance and maintainability findings, the verdict |
+
+Together that is 53 kinds of document. You can turn off the ones you don't need in [Settings](#settings-in-the-interface) to save tokens.
+
+<a href="./docs/images/readme/office-7-agents.png">
+  <img src="./docs/images/readme/office-7-agents.png" alt="The Office page connected to a live backend: seven agents at their desks in a 3D room, beside the team list with each agent's status. Amang is waiting, Planner, Architect and Designer are finished, and Programmer, QA and Reviewer are on standby while the design waits for approval." width="100%">
+</a>
+
+<p align="center"><sub>A real run waiting at the design gate: the design agents are finished, and coding waits for your approval.</sub></p>
+
 ## Demo
 
-These screenshots come from a real run: a task on a small landing page project, with `claude-opus` as the model. The interface text is in Indonesian.
+These screenshots come from real runs with Claude models. The interface text is in Indonesian.
 
 ### How it works: the team divides the work
 
@@ -54,15 +77,30 @@ These screenshots come from a real run: a task on a small landing page project, 
   <img src="./docs/images/readme/cara-kerja-membagi-part.png" alt="The Architect panel during a real run: design documents split into three parts running at the same time. Part 2 is finished after 2 minutes 17 seconds, and parts 1 and 3 are still being written after 2 minutes 28 seconds." width="100%">
 </a>
 
-Instead of one long model call, the Architect's design documents are split into parts that run at the same time. Click any agent to see what it is doing now: which documents each part is writing, how long it has been running, and what is finished. The line "3 parts running at the same time" is computed from the times the backend records, not assumed.
+Instead of one long model call, the design documents are split into parts that run at the same time. Click any agent to see what it is doing now: which documents each part is writing, how long it has been running, and what is finished. The line "3 parts running at the same time" is computed from the times the backend records, not assumed.
 
-### The result: documents you can read
+### Artifacts: diagrams drawn on the page
 
-<a href="./docs/images/readme/bukti-nyata-kerja.png">
-  <img src="./docs/images/readme/bukti-nyata-kerja.png" alt="The Documents page with one tab per agent and a count of finished documents. Each document is labelled as written by claude-opus, and an open Class Diagram is drawn on the page." width="100%">
+<a href="./docs/images/readme/artifacts-diagram.png">
+  <img src="./docs/images/readme/artifacts-diagram.png" alt="The Artifacts page: documents grouped by agent on the left, with a count of diagrams per document. The Architect's Class Diagram is open and drawn on the page, with an Edit diagram button and a table of contents on the right." width="100%">
 </a>
 
-Each agent's output has its own tab, and diagrams are drawn on the page. Every document says where it came from: here, *Tulisan model · claude-opus* means it was written by a model. These are drafts, not evidence, and the page says so. Programmer, QA and Reviewer still show 0 because coding starts only after you approve the design.
+Every agent's output sits in one list, grouped by agent, beside a reader. Search covers titles and text, and filters pick diagrams, UI designs or text. Mermaid diagrams are drawn on the page, and **Edit diagram** opens the code beside a live preview. Each document says where it came from: *Tulisan model · claude-opus* means it was written by a model, so it is a draft, not evidence.
+
+### Artifacts: the Designer's wireframes and tokens
+
+<table>
+  <tr>
+    <td width="50%"><a href="./docs/images/readme/artifacts-wireframe.png"><img src="./docs/images/readme/artifacts-wireframe.png" alt="The Designer's Wireframe per Layar document: 14 screens, the home page drawn at desktop width with a switch for phone width, and an Edit wireframe button."></a></td>
+    <td width="50%"><a href="./docs/images/readme/artifacts-tokens.png"><img src="./docs/images/readme/artifacts-tokens.png" alt="The Designer's Design System / Tokens document: colour tokens shown as swatches with their hex values, and an Edit token button."></a></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>HTML wireframes at desktop and phone width</sub></td>
+    <td align="center"><sub>Design tokens as swatches</sub></td>
+  </tr>
+</table>
+
+The Designer draws each screen as static HTML using the design tokens. Wireframes render in a sandboxed frame that runs no script and loads nothing. You can edit a wireframe or the tokens beside a live preview; at the design gate, approving names what you changed, and the Programmer builds from the approved version.
 
 ## Why Siamang
 
@@ -141,27 +179,18 @@ npm run dev               # http://127.0.0.1:5180
 
 This one command also starts the backend, so you don't need to start the API server. Stop everything with `Ctrl+C`. For a production build, run `npm run build && npm start` instead.
 
-<a href="./docs/images/readme/office-light.png">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/office-dark.png">
-  <img src="./docs/images/readme/office-light.png" alt="The office in demo mode: six agents in a 3D room beside the team list, with a clear SIMULASI label." width="100%">
-</picture>
-</a>
-
-<p align="center"><sub>Demo mode, which is always labelled as a simulation.</sub></p>
+The Office page is shown in [The Team](#the-team) above. To look around without a model or a repository, choose **▶ Mode demo** there; demo mode is always labelled as a simulation.
 
 ### Your first task
 
 The interface text is currently in Indonesian, so the button names below are shown as they appear.
 
-1. Check that the top bar says **Backend tersambung** (backend connected).
+1. Check that the top bar says **Backend tersambung** (backend connected). In **Settings**, check your GitHub and Claude accounts and pick a model for each agent.
 2. Open **Projects**, choose **Proyek baru** (new project), paste a GitHub URL such as `https://github.com/OWNER/REPO`, and choose **Buat proyek** (create project).
 3. Amang reads the repository and asks questions. Answer them on the project page, then choose **Setujui spesifikasi** (approve the specification).
 4. Open **Command**, write what you want, and choose **Kirim ke Amang** (send to Amang). Check the summary, then choose **Setuju, buat task dan mulai** (agree, create the task and start).
 5. Follow the work in **Office** or **Tasks**. When the design is ready, read it in **Artifacts** and choose **Setujui desain** (approve the design) on the task.
 6. When the result is ready, read the evidence in **Reports**, then choose **Approve** in **Approvals**. Siamang creates a commit on a `siamang/*` branch and opens a pull request. Merging stays with you.
-
-To look around without a model or a repository, choose **▶ Mode demo** on the **Office** page. To change which model each agent uses, open **Settings**.
 
 ### What's in it
 
@@ -170,12 +199,32 @@ To look around without a model or a repository, choose **▶ Mode demo** on the 
 | **3D office** | Seven agents, each with a desk and an animated monitor. Orbit, zoom, follow the activity, or click an agent to see its work. |
 | **Handoffs** | Each recorded phase change plays as a handoff between agents. An agent is shown working only when the backend reports fresh activity, never when offline or stale. |
 | **Two-way command** | Amang checks your instruction before a task exists, and a stopped task explains why and can continue with your answer. |
-| **Artifacts** | Each agent's output (documents, diagrams, wireframes) with its origin: written by a model, computed by the system, or measured. Search, filters, and a table of contents for long documents. |
+| **Ask any agent** | Click an agent to ask it about its own work in the current task. It answers from its documents; it does not change them. |
+| **Artifacts** | Each agent's output (documents, diagrams, wireframes, tokens) with its origin: written by a model, computed by the system, or measured. Search, filters, a table of contents, and editors for diagrams, wireframes and tokens. |
+| **Tokens and time** | Input and output tokens and working time per project, task and agent, including failed calls. |
 | **Evidence and approvals** | Checks with exit codes, recovery attempts and technical debt when the sandbox is on. Without it, the page says the code was not run. |
 | **Demo mode** | A simulated run for presentations, always labelled and kept out of Tasks, Reports and Approvals. |
 | **Accessibility** | A text team list and log, reduced motion, native keyboard-friendly controls, and a 2D fallback without WebGL. |
 
-### Settings
+### Settings in the interface
+
+The **Settings** page has four sections.
+
+| Section | What you set |
+|---|---|
+| **Akun** (accounts) | The GitHub account used to clone, push and open pull requests: your `gh` CLI login, or a token pasted here. The Claude login the models use, with its plan. Tokens stay on the local server and are never sent back to the browser. |
+| **Dashboard** | 3D office on or off (off shows the team as a conversation, lighter without a GPU), 3D quality, work animations, and demo mode. Saved in this browser. |
+| **Model per agen** (model per agent) | Which model each of the seven agents uses, Claude or Ollama. Saved to `siamang.toml` and used from the next model call, without a restart. |
+| **Dokumen per agen** (documents per agent) | Which of the 53 documents each agent writes. A document turned off is not requested from the model and not recorded, which saves tokens. Applies to all projects from the next run. |
+
+<table>
+  <tr>
+    <td width="50%"><a href="./docs/images/readme/settings-models.png"><img src="./docs/images/readme/settings-models.png" alt="Settings, Model per agen: a model picker for each of the seven agents, here set to local Ollama models."></a></td>
+    <td width="50%"><a href="./docs/images/readme/settings-documents.png"><img src="./docs/images/readme/settings-documents.png" alt="Settings, Dokumen per agen: one tab per agent with a count of active documents, and a switch for each document. 38 of 53 are on."></a><br/><br/><a href="./docs/images/readme/settings-accounts.png"><img src="./docs/images/readme/settings-accounts.png" alt="Settings, Akun: GitHub connected through the gh CLI with an optional token field, and the Claude login with its plan and a Login ulang button."></a></td>
+  </tr>
+</table>
+
+### Environment variables
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -262,6 +311,11 @@ The full reference is in [docs/HTTP_API.md](docs/HTTP_API.md), and the OpenAPI c
 
 Not tagged as a GitHub release yet. Details are in the [changelog](./CHANGELOG.md).
 
+- **Seven agents**: a UI/UX **Designer** joins between the Architect and the design gate, with design tokens, HTML wireframes, user flow, sitemap and accessibility notes.
+- **Artifacts page**: the Documents page rebuilt as a list grouped by agent beside a reader, with search, filters, a table of contents, and editors for diagrams, wireframes and tokens.
+- **Settings**: GitHub and Claude accounts, a model per agent, and documents per agent that can be turned off to save tokens.
+- **Tokens and time** per project, task and agent, and **questions to any agent** about its own work.
+- **Local projects**: start from nothing, without GitHub or CI; Siamang keeps its own Git repository and merges into `main` on approval.
 - **Sandbox execution** (opt-in): tests and builds run in a container, and that result decides whether a run passes. Not yet tested with a real container.
 - **Programmer tools** (opt-in): the Programmer edits and runs commands inside the sandbox before proposing a patch.
 - **Recovery Engine** (opt-in): three tiers of bounded recovery when delivery fails. Not yet applied to parallel-package runs.

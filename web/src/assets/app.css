@@ -2522,6 +2522,26 @@ details[open] > .collapse-head .collapse-chevron {
   flex-basis: 360px;
 }
 
+.account-control {
+  display: flex;
+  flex-basis: auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.account-token {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 0 12px;
+}
+
+.account-token .field {
+  flex: 1;
+  min-width: 0;
+}
+
 .setting-agent {
   display: flex;
   align-items: center;
@@ -2598,6 +2618,15 @@ details[open] > .collapse-head .collapse-chevron {
   .setting-control,
   .setting-model {
     flex-basis: auto;
+  }
+
+  .account-control {
+    justify-content: flex-start;
+  }
+
+  .account-token {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .settings-section {

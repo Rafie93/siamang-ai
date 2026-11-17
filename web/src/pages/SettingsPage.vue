@@ -1,9 +1,11 @@
 <script setup>
-import { Bot, FileText, LayoutDashboard } from '@lucide/vue'
-import { computed, onMounted, ref } from 'vue'
+import { Bot, FileText, KeyRound, LayoutDashboard } from '@lucide/vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { version } from '../../package.json'
 import AppAlert from '@/components/ui/AppAlert.vue'
 import AppButton from '@/components/ui/AppButton.vue'
+import AppDialog from '@/components/ui/AppDialog.vue'
+import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import AppTabs from '@/components/ui/AppTabs.vue'
@@ -16,6 +18,7 @@ import { useOfficeStore } from '@/stores/office'
 
 const office = useOfficeStore()
 const SECTIONS = [
+  { id: 'settings-accounts', title: 'Akun', icon: KeyRound },
   { id: 'settings-dashboard', title: 'Dashboard', icon: LayoutDashboard },
   { id: 'settings-models', title: 'Model per agen', icon: Bot },
   { id: 'settings-documents', title: 'Dokumen per agen', icon: FileText },
@@ -27,6 +30,119 @@ const QUALITY = [
 const AGENT_TITLES = { lead: agentName('amang') }
 const PROVIDER_TITLES = { ollama: 'Ollama', claude_cli: 'Claude CLI' }
 const jump = id => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+// ── Accounts ────────────────────────────────────────────────────
+// The token is sent once and never comes back; the server answers with who is connected.
+const TOKEN_URL = 'https://github.com/settings/tokens/new?scopes=repo,read:org,workflow&description=Siamang'
+const github = ref(null)
+const githubError = ref('')
+const githubBusy = ref(false)
+const githubToken = ref('')
+const confirmDisconnect = ref(false)
+const claude = ref(null)
+const claudeError = ref('')
+const claudeBusy = ref(false)
+const claudeCode = ref('')
+let claudeTimer = null
+
+const githubSource = computed(() =>
+  github.value?.source === 'siamang' ? 'Token Siamang' : github.value?.source === 'gh' ? 'Login gh CLI' : '',
+)
+const claudeWaiting = computed(() => claude.value?.login.state === 'waiting')
+const formatDate = value => {
+  const d = value ? new Date(value) : null
+  return d && !Number.isNaN(d.getTime())
+    ? d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
+    : ''
+}
+
+async function loadGithub() {
+  try {
+    github.value = await request('/settings/github')
+    githubError.value = ''
+  } catch (e) {
+    githubError.value = e.code
+  }
+}
+
+async function connectGithub() {
+  if (!githubToken.value.trim()) return
+  githubBusy.value = true
+  githubError.value = ''
+  try {
+    github.value = await post('/settings/github', { token: githubToken.value.trim() })
+    githubToken.value = ''
+    await office.refresh()
+  } catch (e) {
+    githubError.value = e.code
+  } finally {
+    githubBusy.value = false
+  }
+}
+
+async function disconnectGithub() {
+  confirmDisconnect.value = false
+  githubBusy.value = true
+  githubError.value = ''
+  try {
+    github.value = await post('/settings/github/disconnect', {})
+    await office.refresh()
+  } catch (e) {
+    githubError.value = e.code
+  } finally {
+    githubBusy.value = false
+  }
+}
+
+function stopClaudePolling() {
+  clearTimeout(claudeTimer)
+  claudeTimer = null
+}
+
+async function loadClaude() {
+  try {
+    const before = claude.value?.login.state
+    claude.value = await request('/settings/claude')
+    claudeError.value =
+      claude.value.login.state === 'failed' && before === 'waiting' ? 'claude_login_failed' : ''
+    if (before === 'waiting' && claude.value.login.state !== 'waiting') await office.refresh()
+  } catch (e) {
+    claudeError.value = e.code
+  }
+  stopClaudePolling()
+  if (claudeWaiting.value) claudeTimer = setTimeout(loadClaude, 2000)
+}
+
+async function loginClaude() {
+  claudeBusy.value = true
+  claudeError.value = ''
+  try {
+    claude.value = await post('/settings/claude/login', {})
+  } catch (e) {
+    claudeError.value = e.code
+  } finally {
+    claudeBusy.value = false
+  }
+  stopClaudePolling()
+  if (claudeWaiting.value) claudeTimer = setTimeout(loadClaude, 2000)
+}
+
+// claude.ai ends on "Kode autentikasi — Tempel ini ke Claude Code": that code goes to the waiting login.
+async function sendClaudeCode() {
+  if (!claudeCode.value.trim()) return
+  claudeBusy.value = true
+  claudeError.value = ''
+  try {
+    claude.value = await post('/settings/claude/code', { code: claudeCode.value.trim() })
+    claudeCode.value = ''
+  } catch (e) {
+    claudeError.value = e.code
+  } finally {
+    claudeBusy.value = false
+  }
+  stopClaudePolling()
+  claudeTimer = setTimeout(loadClaude, 1000)
+}
 
 // ── Model per agent ─────────────────────────────────────────────
 const catalog = ref(null)
@@ -155,9 +271,12 @@ async function switchGroup(group, pick) {
 const changedFromDefault = g => g.items.some(d => d.enabled !== d.default_enabled)
 
 onMounted(() => {
+  loadGithub()
+  loadClaude()
   load()
   loadDocuments()
 })
+onBeforeUnmount(stopClaudePolling)
 </script>
 
 <template>
@@ -169,6 +288,149 @@ onMounted(() => {
     </nav>
 
     <div class="settings-sections">
+      <section id="settings-accounts" class="card settings-section" aria-labelledby="settings-accounts-title">
+        <header class="settings-section-head">
+          <h2 id="settings-accounts-title">Akun</h2>
+          <p>
+            Akun yang dipakai Siamang untuk repo GitHub dan model Claude. Token disimpan di server ini dan
+            tidak pernah dikirim balik ke browser.
+          </p>
+        </header>
+        <div class="settings-rows">
+          <div class="setting-row account-row">
+            <div class="setting-text">
+              <span class="switch-label">GitHub</span>
+              <small v-if="!github && !githubError">Memeriksa akun…</small>
+              <small v-else-if="github && !github.installed">
+                Perintah gh belum terpasang. Pasang GitHub CLI (brew install gh), lalu buka lagi halaman ini.
+              </small>
+              <small v-else-if="github?.connected">
+                Terhubung sebagai <b>@{{ github.login }}</b
+                ><template v-if="github.name"> ({{ github.name }})</template>. Clone, push, dan pull request
+                memakai akun ini.
+              </small>
+              <small v-else-if="github?.stored">
+                Token tersimpan tidak lagi diterima GitHub. Tempel token baru atau putuskan.
+              </small>
+              <small v-else>
+                Belum terhubung. Buat
+                <a :href="TOKEN_URL" target="_blank" rel="noopener noreferrer">personal access token</a>
+                dengan scope <code>repo</code>, <code>read:org</code>, dan <code>workflow</code>, lalu tempel
+                di sini.
+              </small>
+            </div>
+            <div class="setting-control account-control">
+              <AppTag v-if="github?.connected" tone="success">{{ githubSource }}</AppTag>
+              <AppButton
+                v-if="github?.stored"
+                variant="ghost"
+                size="sm"
+                :disabled="!office.can('configure') || githubBusy"
+                @click="confirmDisconnect = true"
+              >
+                Putuskan
+              </AppButton>
+            </div>
+          </div>
+          <form
+            v-if="github?.installed && github.source !== 'siamang'"
+            class="account-token"
+            @submit.prevent="connectGithub"
+          >
+            <AppInput
+              v-model="githubToken"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              aria-label="Token GitHub"
+              placeholder="ghp_… atau github_pat_…"
+              :disabled="!office.can('configure') || githubBusy"
+              :hint="github.source === 'gh' ? 'Opsional: saat ini memakai login gh CLI di komputer ini.' : ''"
+            />
+            <AppButton
+              type="submit"
+              :disabled="!office.can('configure') || githubBusy || !githubToken.trim()"
+            >
+              {{ githubBusy ? 'Memeriksa…' : 'Hubungkan' }}
+            </AppButton>
+          </form>
+          <AppAlert v-if="githubError" tone="error">{{ errorText(githubError) }}</AppAlert>
+
+          <div class="setting-row account-row">
+            <div class="setting-text">
+              <span class="switch-label">Claude</span>
+              <small v-if="!claude && !claudeError">Memeriksa login…</small>
+              <small v-else-if="claude && !claude.installed">
+                Perintah claude belum terpasang. Pasang Claude Code, lalu buka lagi halaman ini.
+              </small>
+              <small v-else-if="claudeWaiting">
+                Login di browser yang terbuka. Bila claude.ai menampilkan <b>Kode autentikasi</b>, salin dan
+                tempel di bawah.
+                <template v-if="claude.login.url">
+                  Browser tidak terbuka?
+                  <a :href="claude.login.url" target="_blank" rel="noopener noreferrer">Buka halaman login</a
+                  >.
+                </template>
+              </small>
+              <small v-else-if="claude?.logged_in">
+                Login sebagai <b>{{ claude.email || 'akun Claude' }}</b>
+                <template v-if="claude.plan"> · paket {{ claude.plan }}</template>
+                <template v-if="formatDate(claude.expires_at)">
+                  · berlaku sampai {{ formatDate(claude.expires_at) }}</template
+                >. Login ini sama dengan Claude Code di komputer ini.
+              </small>
+              <small v-else>Belum login. Model Claude tidak bisa dipakai sampai Anda login.</small>
+            </div>
+            <div class="setting-control account-control">
+              <AppTag v-if="claude?.logged_in && claude.method === 'claude.ai'" tone="success"
+                >Langganan</AppTag
+              >
+              <AppTag v-else-if="claude?.logged_in" tone="warning">{{ claude.method }}</AppTag>
+              <AppButton
+                v-if="claude?.installed"
+                :variant="claude.logged_in ? 'ghost' : 'primary'"
+                size="sm"
+                :disabled="!office.can('configure') || claudeBusy || claudeWaiting"
+                @click="loginClaude"
+              >
+                {{ claudeWaiting ? 'Menunggu…' : claude.logged_in ? 'Login ulang' : 'Login Claude' }}
+              </AppButton>
+            </div>
+          </div>
+          <form v-if="claudeWaiting" class="account-token" @submit.prevent="sendClaudeCode">
+            <AppInput
+              v-model="claudeCode"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              aria-label="Kode autentikasi Claude"
+              placeholder="Tempel kode autentikasi dari claude.ai"
+              :disabled="!office.can('configure') || claudeBusy"
+            />
+            <AppButton type="submit" :disabled="!office.can('configure') || claudeBusy || !claudeCode.trim()">
+              {{ claudeBusy ? 'Mengirim…' : 'Kirim kode' }}
+            </AppButton>
+          </form>
+          <AppAlert v-if="claudeError" tone="error">{{ errorText(claudeError) }}</AppAlert>
+        </div>
+      </section>
+
+      <AppDialog
+        :open="confirmDisconnect"
+        title="Putuskan akun GitHub?"
+        :width="440"
+        @close="confirmDisconnect = false"
+      >
+        <p>
+          Token dihapus dari server ini. Setelah itu Siamang kembali memakai login gh CLI di komputer ini,
+          kalau ada. Token di GitHub tidak dicabut; cabut sendiri di github.com bila perlu.
+        </p>
+        <template #actions>
+          <AppButton variant="ghost" @click="confirmDisconnect = false">Batal</AppButton>
+          <AppButton variant="danger" @click="disconnectGithub">Putuskan</AppButton>
+        </template>
+      </AppDialog>
+
       <section
         id="settings-dashboard"
         class="card settings-section"

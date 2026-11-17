@@ -14,6 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
 from siamang import __version__
+from siamang.accounts import AccountError
 from siamang.approval.errors import ApprovalError
 from siamang.documents.catalog import CATALOG, DEFAULT_DISABLED, SPECS
 from siamang.documents.diagrams import MAX_DIAGRAM_CHARS
@@ -28,6 +29,7 @@ from siamang.tasks.errors import TaskError
 from siamang.tasks.lifecycle import TaskStatus
 
 from . import model_settings, usage
+from .accounts import Accounts
 from .runtime import Runtime, RuntimeRefusal
 from .settings import APISettings
 from .store import RunStore, now
@@ -110,6 +112,16 @@ class AgentModelBody(BaseModel):
     provider_model: str = Field(min_length=1, max_length=256)
 
 
+class GitHubTokenBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    token: str = Field(min_length=1, max_length=300)
+
+
+class ClaudeCodeBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    code: str = Field(min_length=1, max_length=1000)
+
+
 class MessageBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     content: str = Field(min_length=1, max_length=4000)
@@ -124,9 +136,10 @@ def repository_name(value):
     return match.group(1)
 
 
-def create_app(settings: APISettings | None = None, *, models=None, authors=None, repos=None):
+def create_app(settings: APISettings | None = None, *, models=None, authors=None, repos=None, accounts=None):
     settings = settings or APISettings.from_env()
     runtime = Runtime(settings, models, authors, repos)
+    accounts = accounts or Accounts()
 
     @asynccontextmanager
     async def lifespan(app):
@@ -134,6 +147,7 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
         try:
             yield
         finally:
+            accounts.close()
             runtime.close()
 
     app = FastAPI(title='SIAMANG HTTP API', version='0.1.0', lifespan=lifespan,
@@ -190,6 +204,10 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
 
     @app.exception_handler(RuntimeRefusal)
     async def refused(request, exc):
+        return JSONResponse({'error': {'code': exc.code}}, status_code=exc.status)
+
+    @app.exception_handler(AccountError)
+    async def account_refused(request, exc):
         return JSONResponse({'error': {'code': exc.code}}, status_code=exc.status)
 
     @app.exception_handler(RequestValidationError)
@@ -282,6 +300,41 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
         if not principal.allows_project('*'):  # the file applies to every project
             raise RuntimeRefusal('forbidden', 403)
         return public(model_settings.assign(settings.config, body.agent, body.provider, body.provider_model))
+
+    # Accounts. Plain def: each answer runs gh or claude. No token ever leaves the server.
+    def configure_all(principal):
+        if not principal.allows_project('*'):  # an account serves every project
+            raise RuntimeRefusal('forbidden', 403)
+
+    @app.get('/v0/settings/github')
+    def github_account(principal=Depends(permission('read'))):
+        return accounts.github.status()
+
+    @app.post('/v0/settings/github')
+    def connect_github(body: GitHubTokenBody, principal=Depends(permission('configure'))):
+        configure_all(principal)
+        return accounts.github.connect(body.token)
+
+    @app.post('/v0/settings/github/disconnect')
+    def disconnect_github(principal=Depends(permission('configure'))):
+        configure_all(principal)
+        return accounts.github.disconnect()
+
+    @app.get('/v0/settings/claude')
+    def claude_account(principal=Depends(permission('read'))):
+        return accounts.claude.status()
+
+    @app.post('/v0/settings/claude/login')
+    def claude_login(principal=Depends(permission('configure'))):
+        """Opens the claude.ai login in a browser on the machine running Siamang; poll GET to see it finish."""
+        configure_all(principal)
+        return accounts.claude.start_login()
+
+    @app.post('/v0/settings/claude/code')
+    def claude_code(body: ClaudeCodeBody, principal=Depends(permission('configure'))):
+        """The code claude.ai shows after login, handed to the waiting ``claude auth login``."""
+        configure_all(principal)
+        return accounts.claude.submit_code(body.code)
 
     @app.get('/v0/projects')
     async def projects(principal=Depends(permission('read')), db=Depends(database)):
