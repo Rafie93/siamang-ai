@@ -1,3 +1,20 @@
+const documentSettings = data =>
+  Array.isArray(data.items) &&
+  data.items.every(
+    d => typeof d.kind === 'string' && typeof d.agent === 'string' && typeof d.enabled === 'boolean',
+  )
+
+const githubAccount = data =>
+  typeof data.installed === 'boolean' &&
+  typeof data.connected === 'boolean' &&
+  typeof data.stored === 'boolean' &&
+  [null, 'siamang', 'gh'].includes(data.source)
+const claudeAccount = data =>
+  typeof data.installed === 'boolean' &&
+  typeof data.logged_in === 'boolean' &&
+  !!data.login &&
+  ['idle', 'waiting', 'done', 'failed'].includes(data.login.state)
+
 export function validResponse(path, method, data) {
   const route = path.split('?')[0],
     obj = data && typeof data === 'object' && !Array.isArray(data)
@@ -7,6 +24,9 @@ export function validResponse(path, method, data) {
   if (method === 'POST') {
     if (route === '/settings/models')
       return typeof data.agent === 'string' && typeof data.model_id === 'string'
+    if (route === '/settings/documents') return documentSettings(data)
+    if (route === '/settings/github' || route === '/settings/github/disconnect') return githubAccount(data)
+    if (route === '/settings/claude/login' || route === '/settings/claude/code') return claudeAccount(data)
     if (route === '/tasks')
       return task(data.task) && typeof data.duplicate === 'boolean' && data.scheduled === false
     if (route.endsWith('/design-decision'))
@@ -41,6 +61,9 @@ export function validResponse(path, method, data) {
       )
   }
   if (route === '/health') return ['healthy', 'unhealthy'].includes(data.status)
+  if (route === '/settings/documents') return documentSettings(data)
+  if (route === '/settings/github') return githubAccount(data)
+  if (route === '/settings/claude') return claudeAccount(data)
   if (route === '/settings/models')
     return Array.isArray(data.agents) && Array.isArray(data.options) && Array.isArray(data.unreachable)
   if (route === '/capabilities')

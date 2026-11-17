@@ -31,6 +31,12 @@ def _isolated(monkeypatch):
 
 
 @pytest.fixture
+def every_document(monkeypatch):
+    """Every catalog document switched on, for tests about the whole catalog rather than the owner's defaults."""
+    monkeypatch.setattr("siamang.documents.catalog.DEFAULT_DISABLED", frozenset())
+
+
+@pytest.fixture
 def examples():
     return load_examples()
 

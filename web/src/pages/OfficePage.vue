@@ -1,18 +1,15 @@
 <script setup>
-import { ArrowUpRight, Bell, CircleCheckBig, FolderGit2, ListChecks } from '@lucide/vue'
+import { Bell, CircleCheckBig, FolderGit2, ListChecks } from '@lucide/vue'
 import { computed } from 'vue'
 import AgentDetailDialog from '@/components/AgentDetailDialog.vue'
 import OfficeScene from '@/components/OfficeScene.vue'
 import ProjectBoard from '@/components/ProjectBoard.vue'
-import AppAlert from '@/components/ui/AppAlert.vue'
-import AppButton from '@/components/ui/AppButton.vue'
+import TeamConversation from '@/components/TeamConversation.vue'
+import TeamPanel from '@/components/TeamPanel.vue'
 import AppCard from '@/components/ui/AppCard.vue'
-import AppTag from '@/components/ui/AppTag.vue'
-import { AGENTS } from '@/domain/team.js'
 import { useOfficeStore } from '@/stores/office'
 
 const office = useOfficeStore()
-const agentLabel = computed(() => office.agentName(office.focusAgent || 'amang'))
 const stats = computed(() => [
   { title: 'Proyek', value: office.feed.length, note: 'Semua dipegang Amang', icon: FolderGit2 },
   {
@@ -41,94 +38,7 @@ const stats = computed(() => [
 </script>
 
 <template>
-  <div class="office-grid">
-    <OfficeScene
-      :team="office.team"
-      :motion="office.motion"
-      :quality="office.quality"
-      :focus="office.focusAgent"
-      :bubble="office.agentBubble"
-      :subject="office.stageSubject"
-      @select="office.selectCharacter"
-      @toggle-demo="office.toggleDemo"
-    />
-    <AppCard class="team-card" aria-label="Tim agen" title="Tim agen">
-      <template #actions>
-        <AppTag tone="primary">{{ AGENTS.length }}</AppTag>
-      </template>
-      <div class="stack" style="gap: 12px">
-        <AppAlert v-if="office.team.simulated" role="note" tone="warning" class="sim-note">
-          Mode demo aktif — status di bawah adalah simulasi.
-        </AppAlert>
-        <ul class="team-list">
-          <li v-for="a in AGENTS" :key="a.id">
-            <button
-              type="button"
-              :class="{ focused: office.focusAgent === a.id }"
-              :data-status="office.team.agents[a.id].status"
-              :aria-label="`${a.name}, ${a.role}: ${office.team.agents[a.id].label}`"
-              @click="office.openAgent(a.id)"
-            >
-              <span class="swatch" :style="{ background: a.color }" />
-              <span class="who">
-                <strong>{{ a.name }}</strong>
-                <small>{{ a.role }}</small>
-              </span>
-              <span class="state">
-                {{ office.statusText[office.team.agents[a.id].status] || office.team.agents[a.id].status }}
-              </span>
-            </button>
-          </li>
-        </ul>
-        <div class="status-label">
-          <i class="status-dot" :class="{ online: !!office.team.activeAgent }" />{{ office.team.label }}
-        </div>
-        <div>
-          <h3 class="section-title">Komunikasi tim</h3>
-          <ol class="team-log" aria-live="polite">
-            <li v-for="h in office.teamLog" :key="h.key">
-              <b>{{ office.agentName(h.from) }} → {{ office.agentName(h.to) }}</b
-              >{{ h.say }}
-              <small>
-                {{ office.localTime(h.at) }}{{ h.iteration ? ` · iterasi ${h.iteration}` : ''
-                }}{{ office.team.simulated ? ' · simulasi' : '' }}
-              </small>
-            </li>
-          </ol>
-          <p v-if="!office.teamLog.length" class="muted small mb-0">
-            Belum ada serah-terima tercatat untuk task ini.
-          </p>
-        </div>
-        <div class="row">
-          <AppButton variant="secondary" size="sm" style="flex: 1" @click="office.go('command')">
-            Beri tim tugas <ArrowUpRight :size="14" />
-          </AppButton>
-          <AppButton
-            variant="secondary"
-            size="sm"
-            style="flex: 1"
-            @click="office.showDocuments(office.focusAgent)"
-          >
-            Artifacts {{ agentLabel }} <ArrowUpRight :size="14" />
-          </AppButton>
-          <AppButton
-            v-if="!office.demo && office.stage.task?.status === 'queued'"
-            size="sm"
-            style="flex: 1"
-            :disabled="!office.can('run') || !office.cap?.model_configured"
-            @click="office.ask('run', office.stage.task.task_id)"
-          >
-            Jalankan task
-          </AppButton>
-        </div>
-        <small class="faint">
-          Model: {{ office.model }} · animasi kerja hanya tampil saat backend melaporkan aktivitas segar.
-        </small>
-      </div>
-    </AppCard>
-  </div>
-
-  <div class="grid grid-4" style="margin: 16px 0 24px">
+  <div class="grid grid-4 office-stats">
     <AppCard v-for="s in stats" :key="s.title">
       <div class="row" style="flex-wrap: nowrap; gap: 12px">
         <span class="icon-box" :data-tone="s.tone"
@@ -144,6 +54,22 @@ const stats = computed(() => [
         </div>
       </div>
     </AppCard>
+  </div>
+
+  <div class="office-grid" :class="{ conversational: !office.scene3d }">
+    <OfficeScene
+      v-if="office.scene3d"
+      :team="office.team"
+      :motion="office.motion"
+      :quality="office.quality"
+      :focus="office.focusAgent"
+      :bubble="office.agentBubble"
+      :subject="office.stageSubject"
+      @select="office.selectCharacter"
+      @toggle-demo="office.toggleDemo"
+    />
+    <TeamConversation v-else />
+    <TeamPanel :with-log="office.scene3d" />
   </div>
 
   <ProjectBoard />

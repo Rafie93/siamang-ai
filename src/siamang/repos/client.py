@@ -28,6 +28,8 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+from .account import read_token
+
 REPOSITORY_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}')
 BRANCH_RE = re.compile(r'siamang/[a-z0-9][a-z0-9-]{0,80}')
 # Default branches come from GitHub and reach `git fetch` as data: no options, no refspec syntax.
@@ -90,12 +92,15 @@ def _check_base(base):
 
 
 class RepoClient:
-    def __init__(self, *, remote='https://github.com/{}.git', protocol='https'):
-        self._remote, self._protocol = remote, protocol
+    def __init__(self, *, remote='https://github.com/{}.git', protocol='https', token_file=None):
+        self._remote, self._protocol, self._token_file = remote, protocol, token_file
         self._fetch_guard, self._fetch_locks = threading.Lock(), {}
 
     def _env(self):
         env = {k: os.environ[k] for k in ENV_ALLOWLIST if k in os.environ}
+        token = read_token(self._token_file)  # connected from Settings; otherwise the owner's own gh login
+        if token:
+            env['GH_TOKEN'] = token
         return env | {'GIT_TERMINAL_PROMPT': '0', 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1',
                       'GH_PROMPT_DISABLED': '1', 'GH_NO_UPDATE_NOTIFIER': '1'}
 

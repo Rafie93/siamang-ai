@@ -14,8 +14,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
 from siamang import __version__
+from siamang.accounts import AccountError
 from siamang.approval.errors import ApprovalError
-from siamang.documents.catalog import CATALOG
+from siamang.documents.catalog import CATALOG, DEFAULT_DISABLED, SPECS
 from siamang.documents.diagrams import MAX_DIAGRAM_CHARS
 from siamang.ids import new_id
 from siamang.jsondata import thaw
@@ -28,6 +29,7 @@ from siamang.tasks.errors import TaskError
 from siamang.tasks.lifecycle import TaskStatus
 
 from . import model_settings, usage
+from .accounts import Accounts
 from .runtime import Runtime, RuntimeRefusal
 from .settings import APISettings
 from .store import RunStore, now
@@ -97,11 +99,27 @@ class NewProject(BaseModel):
     repository: str | None = Field(default=None, max_length=200)
 
 
+class DocumentSettingBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    kind: str = Field(max_length=64)
+    enabled: bool
+
+
 class AgentModelBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     agent: str = Field(max_length=32)
     provider: str = Field(min_length=1, max_length=128)
     provider_model: str = Field(min_length=1, max_length=256)
+
+
+class GitHubTokenBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    token: str = Field(min_length=1, max_length=300)
+
+
+class ClaudeCodeBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    code: str = Field(min_length=1, max_length=1000)
 
 
 class MessageBody(BaseModel):
@@ -118,9 +136,10 @@ def repository_name(value):
     return match.group(1)
 
 
-def create_app(settings: APISettings | None = None, *, models=None, authors=None, repos=None):
+def create_app(settings: APISettings | None = None, *, models=None, authors=None, repos=None, accounts=None):
     settings = settings or APISettings.from_env()
     runtime = Runtime(settings, models, authors, repos)
+    accounts = accounts or Accounts()
 
     @asynccontextmanager
     async def lifespan(app):
@@ -128,6 +147,7 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
         try:
             yield
         finally:
+            accounts.close()
             runtime.close()
 
     app = FastAPI(title='SIAMANG HTTP API', version='0.1.0', lifespan=lifespan,
@@ -186,6 +206,10 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
     async def refused(request, exc):
         return JSONResponse({'error': {'code': exc.code}}, status_code=exc.status)
 
+    @app.exception_handler(AccountError)
+    async def account_refused(request, exc):
+        return JSONResponse({'error': {'code': exc.code}}, status_code=exc.status)
+
     @app.exception_handler(RequestValidationError)
     async def invalid(request, exc):
         return JSONResponse({'error': {'code': 'invalid_request'}}, status_code=422)
@@ -229,7 +253,8 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
                                  headers={'X-Accel-Buffering': 'no'})
 
     @app.get('/v0/capabilities')
-    async def capabilities(principal=Depends(permission('read'))):
+    async def capabilities(principal=Depends(permission('read')), db=Depends(database)):
+        off = RunStore(db).disabled_documents()
         try:
             runtime.models()
             configured = True
@@ -240,11 +265,30 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
                 'agent_models': runtime.assignments(),
                 'execution': runtime.execution_features(),
                 'autonomy': dict(level=runtime.autonomy().level, lead=runtime.autonomy().lead),
-                'documents': [dict(agent=s.agent, stage=s.stage, kind=s.kind, title=s.title, source=str(s.source), blocks=list(s.blocks))
-                              for s in CATALOG],
+                'documents': [dict(agent=s.agent, stage=s.stage, kind=s.kind, title=s.title, source=str(s.source), blocks=list(s.blocks),
+                                   enabled=s.kind not in off) for s in CATALOG],
                 'task_statuses': [s.value for s in TaskStatus],
                 'execution_phases': ['queued', 'clarification', 'briefing', 'planning', 'analysis', 'designing', 'design_approval', 'programming',
                                      'qa', 'verifying', 'recovering', 'deciding', 'reviewing', 'reporting', 'awaiting_approval', 'blocked', 'interrupted', 'finished', 'failed', 'cancelled']}
+
+    def document_settings(db):
+        off = RunStore(db).disabled_documents()
+        return {'items': [dict(agent=s.agent, stage=s.stage, kind=s.kind, title=s.title, source=str(s.source),
+                               enabled=s.kind not in off, default_enabled=s.kind not in DEFAULT_DISABLED) for s in CATALOG]}
+
+    @app.get('/v0/settings/documents')
+    async def documents_catalog(principal=Depends(permission('read')), db=Depends(database)):
+        return document_settings(db)
+
+    @app.post('/v0/settings/documents')
+    async def switch_document(body: DocumentSettingBody, principal=Depends(permission('configure')), db=Depends(database)):
+        """Switches one document on or off for every project's next run. Runs already under way keep what they started with."""
+        if not principal.allows_project('*'):  # the setting applies to every project
+            raise RuntimeRefusal('forbidden', 403)
+        if body.kind not in SPECS:
+            raise RuntimeRefusal('invalid_document', 422)
+        RunStore(db).set_document_enabled(body.kind, body.enabled, principal.identity)
+        return document_settings(db)
 
     # Plain def: asking Ollama for its tags must not hold up the event loop.
     @app.get('/v0/settings/models')
@@ -256,6 +300,41 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
         if not principal.allows_project('*'):  # the file applies to every project
             raise RuntimeRefusal('forbidden', 403)
         return public(model_settings.assign(settings.config, body.agent, body.provider, body.provider_model))
+
+    # Accounts. Plain def: each answer runs gh or claude. No token ever leaves the server.
+    def configure_all(principal):
+        if not principal.allows_project('*'):  # an account serves every project
+            raise RuntimeRefusal('forbidden', 403)
+
+    @app.get('/v0/settings/github')
+    def github_account(principal=Depends(permission('read'))):
+        return accounts.github.status()
+
+    @app.post('/v0/settings/github')
+    def connect_github(body: GitHubTokenBody, principal=Depends(permission('configure'))):
+        configure_all(principal)
+        return accounts.github.connect(body.token)
+
+    @app.post('/v0/settings/github/disconnect')
+    def disconnect_github(principal=Depends(permission('configure'))):
+        configure_all(principal)
+        return accounts.github.disconnect()
+
+    @app.get('/v0/settings/claude')
+    def claude_account(principal=Depends(permission('read'))):
+        return accounts.claude.status()
+
+    @app.post('/v0/settings/claude/login')
+    def claude_login(principal=Depends(permission('configure'))):
+        """Opens the claude.ai login in a browser on the machine running Siamang; poll GET to see it finish."""
+        configure_all(principal)
+        return accounts.claude.start_login()
+
+    @app.post('/v0/settings/claude/code')
+    def claude_code(body: ClaudeCodeBody, principal=Depends(permission('configure'))):
+        """The code claude.ai shows after login, handed to the waiting ``claude auth login``."""
+        configure_all(principal)
+        return accounts.claude.submit_code(body.code)
 
     @app.get('/v0/projects')
     async def projects(principal=Depends(permission('read')), db=Depends(database)):

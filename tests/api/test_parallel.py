@@ -7,6 +7,7 @@ import time
 import pytest
 
 pytest.importorskip('fastapi')
+pytestmark = pytest.mark.usefixtures('every_document')
 from fastapi.testclient import TestClient
 
 from siamang.api.app import create_app

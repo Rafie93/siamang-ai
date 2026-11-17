@@ -10,7 +10,7 @@ import {
 } from '@lucide/vue'
 import { createRouter, createWebHistory } from 'vue-router'
 
-// One entry per page. Entries without an icon are reachable but stay out of the sidebar.
+// One entry per page. Entries without an icon, or marked hidden, are reachable but stay out of the sidebar.
 export const pages = [
   {
     path: '/',
@@ -60,6 +60,7 @@ export const pages = [
     name: 'reports',
     title: 'Reports',
     icon: ChartColumn,
+    hidden: true, // still opened from a task's Lihat laporan
     component: () => import('@/pages/ReportsPage.vue'),
   },
   {
@@ -73,6 +74,7 @@ export const pages = [
     path: '/settings',
     name: 'settings',
     title: 'Settings',
+    subtitle: 'Tampilan dashboard, model tiap agen, dan dokumen yang dihasilkan tim.',
     icon: Settings,
     component: () => import('@/pages/SettingsPage.vue'),
   },

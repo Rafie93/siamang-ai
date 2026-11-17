@@ -122,6 +122,8 @@ Anything hosted or shared needs an API-key adapter instead.
   silently switch billing to the API. Health is unavailable unless the login is
   a subscription. To use `claude setup-token` instead, set
   `api_key_env = "CLAUDE_CODE_OAUTH_TOKEN"`; the health check then accepts it.
+* The web interface's Settings → Akun shows `claude auth status` and can start
+  `claude auth login` for the owner; see `/v0/settings/claude` in HTTP_API.md.
 * Each call runs in an empty temporary directory with no tools, no MCP servers,
   no user or project settings, and no saved session. `--bare` is not used because
   it does not read subscription credentials.

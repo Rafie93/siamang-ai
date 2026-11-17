@@ -12,7 +12,7 @@ test('real backend, navigation and task submission without execution', async ({ 
   await expect(page.getByRole('status')).toContainText('Task diterima')
   await expect(page.getByRole('button', { name: 'Jalankan proposal' })).toBeVisible()
   await nav(page, 'Settings')
-  await expect(page.getByText('Browser → gateway lokal → SIAMANG → model')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Model per agen' })).toBeVisible()
   expect(errors).toEqual([])
 })
 test('WebGL unavailable preserves accessible command UI and mobile layout', async ({ page }) => {
@@ -395,7 +395,7 @@ test('settings chooses an agent model and only sends what was offered', async ({
   )
   await expect(qa.locator('option', { hasText: 'gone:1' })).toBeDisabled()
   await qa.selectOption('ollama/phi3:mini')
-  await expect(page.getByText('Tersimpan')).toBeVisible()
+  await expect(page.getByText('Tersimpan', { exact: true })).toBeVisible()
   expect(sent).toEqual([{ agent: 'qa', provider: 'ollama', provider_model: 'phi3:mini' }])
 })
 test('a task shows its packages, its build and its artifacts, and a failed build can become a revision', async ({

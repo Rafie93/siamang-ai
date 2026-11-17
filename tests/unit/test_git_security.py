@@ -26,7 +26,10 @@ GIT_PKG = SRC / "git"
 CLIENT = GIT_PKG / "client.py"
 CLAUDE_CLI = SRC / "models" / "providers" / "claude_cli.py"
 REPO_CLIENT = SRC / "repos" / "client.py"
-PROCESS_BOUNDARIES = {"git/client.py", "models/providers/claude_cli.py", "repos/client.py", "sandbox/runtime.py"}
+GITHUB_ACCOUNT = SRC / "accounts" / "github.py"
+CLAUDE_ACCOUNT = SRC / "accounts" / "claude.py"
+PROCESS_BOUNDARIES = {"git/client.py", "models/providers/claude_cli.py", "repos/client.py", "sandbox/runtime.py",
+                      "accounts/github.py", "accounts/claude.py"}
 SECRET = "ghp_GIT-ENV-SECRET-777"
 
 NETWORK_COMMANDS = ("push", "pull", "fetch", "clone", "ls-remote", "remote update", "remote show",
@@ -105,11 +108,19 @@ def test_only_the_named_boundaries_spawn_processes():
     assert subprocess_importers(_sources()) == PROCESS_BOUNDARIES
 
 
-@pytest.mark.parametrize("path", [CLIENT, CLAUDE_CLI, REPO_CLIENT])
+@pytest.mark.parametrize("path", [CLIENT, CLAUDE_CLI, REPO_CLIENT, GITHUB_ACCOUNT])
 def test_every_subprocess_call_has_a_timeout_and_no_shell(path):
     assert subprocess_run_calls_without_timeout(path.read_text()) == []
     assert shell_violations(path.read_text()) == []
     assert "subprocess.run(" in path.read_text()
+
+
+def test_claude_login_is_the_one_popen_and_a_timer_kills_it():
+    """`claude auth login` streams its fallback URL, so it is a Popen; a Timer bounds it instead of timeout=."""
+    source = CLAUDE_ACCOUNT.read_text()
+    assert len(subprocess_run_calls_without_timeout(source)) == 1 and source.count("subprocess.Popen(") == 1
+    assert "threading.Timer(self._timeout, proc.kill)" in source
+    assert shell_violations(source) == []
 
 
 def test_network_and_mutating_commands_are_blocked():

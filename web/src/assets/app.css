@@ -1035,8 +1035,100 @@ details[open] > .collapse-head .collapse-chevron {
 }
 
 /* Task, project and evidence pages */
-.command-card {
-  max-width: 960px;
+/* Command: the form, and beside it how the team takes a task and what this project already has. */
+.command-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: start;
+}
+
+.command-aside {
+  display: grid;
+  gap: 16px;
+}
+
+.command-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.command-steps {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.command-steps li {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  column-gap: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  counter-increment: step;
+}
+
+.command-steps li::before {
+  content: counter(step);
+  display: grid;
+  grid-row: span 2;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.command-steps span {
+  color: var(--color-text-2);
+}
+
+.command-recent {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.command-recent button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.command-recent button:hover {
+  background: var(--color-hover);
+}
+
+@media (max-width: 1100px) {
+  .command-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .command-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .status-filter {
@@ -1732,7 +1824,7 @@ details[open] > .collapse-head .collapse-chevron {
 .doc-browser {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
-  height: calc(100dvh - 250px);
+  height: calc(100dvh - 190px);
   min-height: 480px;
   overflow: hidden;
   border: 1px solid var(--color-border);
@@ -2146,4 +2238,407 @@ details[open] > .collapse-head .collapse-chevron {
     font-size: 13px;
     cursor: pointer;
   }
+}
+
+/* Page header: a segmented view switch, and on task pages the pickers that replace the action button. */
+.page-header {
+  align-items: flex-end;
+}
+
+.page-header-pickers {
+  display: flex;
+  flex: 0 1 720px;
+  gap: 12px;
+  min-width: 0;
+}
+
+.page-header-pickers .project-select {
+  flex: 1 1 260px;
+  min-width: 180px;
+}
+
+.page-header-pickers .task-select {
+  flex-basis: 360px;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-subtle);
+}
+
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--color-text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: 500;
+  box-shadow: var(--shadow-sm);
+}
+
+@media (max-width: 760px) {
+  .page-header-pickers {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+  }
+}
+
+/* Task detail: the work on the left, the phase history beside it in its own scroll. */
+.task-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+}
+
+.task-detail-main {
+  min-width: 0;
+}
+
+.task-history {
+  position: sticky;
+  top: 72px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 96px);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg);
+}
+
+.task-history-head {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.history-list {
+  margin: 0;
+  padding: 6px 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.history-list li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.history-list li + li::after {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 18px;
+  height: 12px;
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.history-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--color-primary);
+}
+
+.history-list li[data-state='failed'] .history-dot {
+  background: var(--color-error);
+}
+
+.history-list li[data-state='waiting'] .history-dot,
+.history-list li[data-state='blocked'] .history-dot {
+  background: var(--color-warning);
+}
+
+.history-list li[data-state='scheduled'] .history-dot {
+  background: var(--color-text-3);
+}
+
+.history-text {
+  display: grid;
+  min-width: 0;
+}
+
+.history-phase {
+  font-weight: 500;
+}
+
+.history-list time {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1100px) {
+  .task-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .task-history {
+    position: static;
+    max-height: 420px;
+  }
+}
+
+/* Settings: a section list beside rows of label-and-control, like most product settings pages. */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  max-width: 1080px;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 72px;
+  display: grid;
+  gap: 2px;
+}
+
+.settings-nav button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-text-2);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.settings-nav button:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.settings-sections {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+
+.settings-section {
+  padding: 20px 24px 8px;
+  scroll-margin-top: 72px;
+}
+
+.settings-section-head {
+  margin-bottom: 8px;
+  align-items: flex-start;
+}
+
+.settings-section-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.settings-section-head p {
+  max-width: 640px;
+  margin: 4px 0 0;
+  color: var(--color-text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-rows {
+  display: grid;
+}
+
+.settings-rows > * {
+  border-top: 1px solid var(--color-border);
+}
+
+.settings-rows > :first-child {
+  border-top: 0;
+}
+
+.switch-row,
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 14px 0;
+}
+
+.switch-row {
+  flex-direction: row-reverse;
+}
+
+.switch-text,
+.setting-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.switch-label {
+  font-weight: 500;
+}
+
+.switch-text small,
+.setting-text small {
+  color: var(--color-text-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.switch.disabled,
+.setting-row.disabled .setting-text {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.setting-control {
+  flex: 0 0 220px;
+}
+
+.setting-model {
+  flex-basis: 360px;
+}
+
+.account-control {
+  display: flex;
+  flex-basis: auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.account-token {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 0 12px;
+}
+
+.account-token .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-agent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.setting-agent > span:last-child {
+  display: grid;
+}
+
+.doc-settings-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 0 4px;
+}
+
+.doc-settings-rows {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 32px;
+  padding-bottom: 12px;
+}
+
+.doc-settings-rows > :nth-child(2) {
+  border-top: 0;
+}
+
+.doc-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+}
+
+.settings-footer {
+  margin: 0;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-nav {
+    position: static;
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .settings-nav button {
+    flex: none;
+  }
+
+  .doc-settings-rows {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .doc-settings-rows > :nth-child(2) {
+    border-top: 1px solid var(--color-border);
+  }
+}
+
+@media (max-width: 600px) {
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .setting-control,
+  .setting-model {
+    flex-basis: auto;
+  }
+
+  .account-control {
+    justify-content: flex-start;
+  }
+
+  .account-token {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .settings-section {
+    padding-inline: 16px;
+  }
+}
+
+.command-recent button > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.command-recent button > :last-child {
+  flex: none;
 }

@@ -84,9 +84,23 @@ CATALOG: tuple[Spec, ...] = (
 )
 EDITABLE_BLOCKS = {'wireframes': ('mermaid', 'html'), 'design_tokens': ('mermaid', 'json')}
 CATALOG = tuple(replace(s, blocks=EDITABLE_BLOCKS[s.kind]) if s.kind in EDITABLE_BLOCKS else s for s in CATALOG)
+# Off until the owner switches them on in Settings: useful, but most tasks do not need them and each one costs tokens
+# or screen space. A switched-off document is neither asked of a model nor recorded.
+DEFAULT_DISABLED = frozenset({
+    'wbs', 'complexity', 'acceptance_criteria', 'dependencies',
+    'technical_design',
+    'ui_spec', 'user_flow', 'accessibility',
+    'implementation_notes',
+    'coverage_report', 'ci_results', 'build_artifacts', 'qa_verdict',
+})
 AGENTS = ('lead', 'planner', 'analyst', 'designer', 'programmer', 'qa', 'reviewer')
 SPECS = {spec.kind: spec for spec in CATALOG}
 
 
-def specs_for(stage: str, source: Source | None = None) -> tuple[Spec, ...]:
-    return tuple(s for s in CATALOG if s.stage == stage and (source is None or s.source is source))
+def specs_for(stage: str, source: Source | None = None, skip: frozenset[str] = frozenset()) -> tuple[Spec, ...]:
+    return tuple(s for s in CATALOG if s.stage == stage and (source is None or s.source is source) and s.kind not in skip)
+
+
+def disabled_kinds(overrides: dict[str, bool]) -> frozenset[str]:
+    """The documents switched off: the defaults, changed by what the owner chose. Unknown kinds are ignored."""
+    return frozenset(k for k in SPECS if not overrides.get(k, k not in DEFAULT_DISABLED))
