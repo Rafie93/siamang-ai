@@ -26,6 +26,7 @@
   <a href="#overview">Overview</a> ·
   <a href="#the-team">The Team</a> ·
   <a href="#demo">Demo</a> ·
+  <a href="#changing-the-design">Changing the Design</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="#web-interface">Web Interface</a> ·
   <a href="#cli">CLI</a> ·
@@ -85,7 +86,7 @@ Instead of one long model call, the design documents are split into parts that r
   <img src="./docs/images/readme/artifacts-diagram.png" alt="The Artifacts page: documents grouped by agent on the left, with a count of diagrams per document. The Architect's Class Diagram is open and drawn on the page, with an Edit diagram button and a table of contents on the right." width="100%">
 </a>
 
-Every agent's output sits in one list, grouped by agent, beside a reader. Search covers titles and text, and filters pick diagrams, UI designs or text. Mermaid diagrams are drawn on the page, and **Edit diagram** opens the code beside a live preview. Each document says where it came from: *Tulisan model · claude-opus* means it was written by a model, so it is a draft, not evidence.
+Every agent's output sits in one list, grouped by agent, beside a reader. Search covers titles and text, and filters pick diagrams, UI designs or text. Mermaid diagrams are drawn on the page, and **Edit diagram** opens the code beside a live preview ([what happens after an edit](#changing-the-design)). Each document says where it came from: *Tulisan model · claude-opus* means it was written by a model, so it is a draft, not evidence.
 
 ### Artifacts: the Designer's wireframes and tokens
 
@@ -100,7 +101,48 @@ Every agent's output sits in one list, grouped by agent, beside a reader. Search
   </tr>
 </table>
 
-The Designer draws each screen as static HTML using the design tokens. Wireframes render in a sandboxed frame that runs no script and loads nothing. You can edit a wireframe or the tokens beside a live preview; at the design gate, approving names what you changed, and the Programmer builds from the approved version.
+The Designer draws each screen as static HTML using the design tokens. Wireframes render in a sandboxed frame that runs no script and loads nothing. You can edit a wireframe or the tokens beside a live preview; see [Changing the Design](#changing-the-design) for what happens next.
+
+## Changing the Design
+
+The design is not frozen once a model writes it. You can change a diagram, a wireframe or the design tokens yourself, or ask for a change in plain words. Either way the change goes through the same gates as the original design, and nothing already shipped is overwritten.
+
+### Three ways to change it
+
+| Way | Where | What it does |
+|---|---|---|
+| **Edit it yourself** | **Artifacts** → **Edit diagram**, **Edit wireframe** or **Edit token** | Opens the source beside a live preview: Mermaid for diagrams, HTML for wireframes, JSON for tokens. Saving replaces only that block and keeps the earlier text as a revision. |
+| **Tell Amang** | **Command** → pick **Revisi: *task*** (revise this task), or **Arahan untuk tim** (directions for the team) on a stopped task | Amang turns your words into a brief, you confirm it, and the team does the work again with your directions. |
+| **Ask an agent** | Click an agent in **Office**, or **Tanya agen** on **Tasks** | The agent explains its own work: why a diagram looks the way it does, what a screen is for. **Asking changes nothing**; to change something, use one of the two ways above. |
+
+### What happens after a change
+
+Where the task is decides what an edit does:
+
+| The task is... | Your edit... | Then |
+|---|---|---|
+| **At the design gate** (waiting for **Setujui desain**) | is held with the design | Approving names every block you changed. Edited blocks reach the Programmer first, marked `owner_edited`, and take precedence over the rest of the design. |
+| **Stopped** (held by QA or the Reviewer, or the Programmer needs input) | waits until you choose **Kirim ke Programmer** (send to the Programmer) | The run goes again on the changed design. Edit several blocks first, then send once. |
+| **Published** (the PR is open or merged) | becomes a proposal | **Buat task revisi** (create a revision task) starts a new task from your edits. It joins the open PR, or uses a new branch from `main` once the PR is merged. The shipped task and its evidence stay as they were. |
+
+```mermaid
+flowchart LR
+  E["Edit in Artifacts<br/>or tell Amang"] --> S{Where is the task?}
+  S -->|design gate| G[Approve the design<br/>with your edits]
+  S -->|stopped| K[Send to Programmer]
+  S -->|published| V[Revision task]
+  G --> C[Programmer builds from<br/>the edited design]
+  K --> C
+  V --> C
+  C --> Q[QA and Reviewer] --> A{Final approval} --> PR[Commit and PR]
+```
+
+### What is kept
+
+- **Every earlier version.** An edit never deletes text: the previous block is kept in an append-only revision log.
+- **No silent overwrite.** If the document changed while you were editing, saving is refused and you start again from the new version.
+- **Approval matches what you saw.** The design approval records a digest of the documents. Approving with edits names exactly what changed.
+- **Rejecting is final for that task.** **Tolak** (reject) at the design gate needs a reason and cancels the task. To try again, start a new task or a revision.
 
 ## Why Siamang
 
@@ -199,7 +241,7 @@ The interface text is currently in Indonesian, so the button names below are sho
 | **3D office** | Seven agents, each with a desk and an animated monitor. Orbit, zoom, follow the activity, or click an agent to see its work. |
 | **Handoffs** | Each recorded phase change plays as a handoff between agents. An agent is shown working only when the backend reports fresh activity, never when offline or stale. |
 | **Two-way command** | Amang checks your instruction before a task exists, and a stopped task explains why and can continue with your answer. |
-| **Ask any agent** | Click an agent to ask it about its own work in the current task. It answers from its documents; it does not change them. |
+| **Ask any agent** | Click an agent to ask it about its own work in the current task. It answers from its documents and changes nothing; see [Changing the Design](#changing-the-design). |
 | **Artifacts** | Each agent's output (documents, diagrams, wireframes, tokens) with its origin: written by a model, computed by the system, or measured. Search, filters, a table of contents, and editors for diagrams, wireframes and tokens. |
 | **Tokens and time** | Input and output tokens and working time per project, task and agent, including failed calls. |
 | **Evidence and approvals** | Checks with exit codes, recovery attempts and technical debt when the sandbox is on. Without it, the page says the code was not run. |
