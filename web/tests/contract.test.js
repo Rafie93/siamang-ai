@@ -21,3 +21,27 @@ it('checks the model settings shapes', () => {
   expect(validResponse('/settings/models', 'POST', { agent: 'qa', model_id: 'x' })).toBe(true)
   expect(validResponse('/settings/models', 'POST', { agent: 'qa' })).toBe(false)
 })
+it('accepts a chat with one agent only in its own shape', () => {
+  const thread = {
+    agent: 'designer',
+    items: [{ position: 1, role: 'owner', message: 'Hai' }],
+    thinking: true,
+    available: true,
+  }
+  expect(validResponse('/tasks/tsk_x/agents/designer/chat', 'GET', thread)).toBe(true)
+  expect(validResponse('/projects/prj_x/agents/designer/chat', 'GET', { ...thread, thinking: 'yes' })).toBe(
+    false,
+  )
+  expect(
+    validResponse('/tasks/tsk_x/agents/designer/chat', 'GET', {
+      ...thread,
+      items: [{ position: 1, role: 'lead' }],
+    }),
+  ).toBe(false)
+  expect(
+    validResponse('/tasks/tsk_x/agents/designer/chat', 'POST', { agent: 'designer', state: 'thinking' }),
+  ).toBe(true)
+  expect(
+    validResponse('/tasks/tsk_x/agents/designer/chat', 'POST', { agent: 'designer', state: 'scheduled' }),
+  ).toBe(false)
+})

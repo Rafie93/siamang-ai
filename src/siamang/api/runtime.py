@@ -38,7 +38,8 @@ from siamang.documents.author import (
     write_batches,
     write_documents,
 )
-from siamang.documents.catalog import SPECS, DocumentStatus, Source, specs_for
+from siamang.documents.chat import ask_agent
+from siamang.documents.catalog import AGENTS, SPECS, DocumentStatus, Source, specs_for
 from siamang.documents.diagrams import InvalidDiagram, carry_block, changed_diagrams, diagrams_of, line_changes, replace_diagram
 from siamang.documents.derive import programmer_documents, qa_documents, review_documents
 from siamang.documents.packages import divide, render
@@ -100,6 +101,11 @@ MODEL_POLICY = ProgrammingPolicy(model_timeout_secs=600, max_context_file_size=6
 
 SYSTEM_NOTES = ('From analysis:', 'Not shown to the model:')  # added by the Programmer service, not questions
 # Every way a run can stop short of an approval takes an answer from the owner, and that answer resumes it.
+CHAT_CLIP = 6_000  # characters of each of the agent's own documents it is shown in a chat
+SPEC_CLIP = 4_000
+CHAT_TASKS = 30
+CHAT_MESSAGES = 20
+CHAT_EVENTS = 15
 ANSWERABLE = ('clarification_required', 'quality_gate', 'input_required', 'worker_interrupted')
 MAX_BLOCKERS = 8
 DESIGN_STAGES = ('briefing', 'planning', 'analysis', 'designing')
@@ -207,6 +213,9 @@ class Runtime:
         self._authors = authors or {}
         self._repos = repos or RepoClient()
         self._background = None
+        self._chat_pool = None  # the owner's chats with agents: never behind the Lead's intake, never on the run's worker
+        self._chatting = set()  # threads waiting for an agent's answer, as (project_id, task_id, agent)
+        self._chat_lock = threading.Lock()
         self._busy = threading.Lock()
         self.hub = None
         self._pool = None
@@ -328,6 +337,7 @@ class Runtime:
             self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='siamang-proposals')
             self._background = ThreadPoolExecutor(max_workers=1, thread_name_prefix='siamang-lead')
             self._ci_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='siamang-ci')
+            self._chat_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='siamang-chat')
             self._ci_wake.clear()
             self._closing = False
             self.hub = ChangeHub(self.settings.database)
@@ -350,6 +360,10 @@ class Runtime:
         if self._ci_pool:
             self._ci_pool.shutdown(wait=True, cancel_futures=True)
             self._ci_pool = None
+        if self._chat_pool:
+            self._chat_pool.shutdown(wait=True, cancel_futures=True)
+            self._chat_pool = None
+        self._chatting.clear()
         if self._pool:
             self._pool.shutdown(wait=True, cancel_futures=False)
             self._pool = None
@@ -1659,6 +1673,96 @@ class Runtime:
                 store.set_ci(task_id, sha, 'watching')
                 if self._ci_pool and not self._closing:
                     self._ci_pool.submit(self._watch_ci, task_id)
+
+    # -- the owner's chat with one agent: questions only, nothing in the work changes -----------
+
+    def agent_chat(self, project_id, task_id, agent):
+        """One thread and whether its agent is still answering."""
+        if agent not in AGENTS:
+            raise RuntimeRefusal('unknown_agent', 404)
+        with Database(self.settings.database) as db:
+            items = RunStore(db).agent_chat(project_id, task_id, agent)
+        # The answer is stored before the thread is released: once it is there, the agent is done whatever the set says.
+        return dict(project_id=project_id, task_id=task_id, agent=agent, items=items,
+                    thinking=(project_id, task_id, agent) in self._chatting and bool(items) and items[-1]['role'] == 'owner',
+                    available=self.author(agent) is not None)
+
+    def post_agent_chat(self, project_id, task_id, agent, content):
+        """Neither the run's worker nor its state is touched: an agent can be asked while the run goes on."""
+        if agent not in AGENTS:
+            raise RuntimeRefusal('unknown_agent', 404)
+        if self.author(agent) is None:
+            raise RuntimeRefusal('agent_has_no_model', 503)
+        if self._closing or not self._chat_pool:
+            raise RuntimeRefusal('runtime_unavailable', 503)
+        key = (project_id, task_id, agent)
+        with self._chat_lock:
+            if key in self._chatting:
+                raise RuntimeRefusal('agent_busy')
+            self._chatting.add(key)
+        try:
+            with Database(self.settings.database) as db:
+                RunStore(db).add_agent_chat(project_id, task_id, agent, 'owner', {'message': content})
+            self._chat_pool.submit(self._agent_chat_turn, project_id, task_id, agent)
+        except BaseException:
+            self._chatting.discard(key)
+            raise
+        return dict(project_id=project_id, task_id=task_id, agent=agent, state='thinking')
+
+    def _agent_chat_turn(self, project_id, task_id, agent):
+        key = (project_id, task_id, agent)
+        try:
+            with Database(self.settings.database) as db:
+                store = RunStore(db)
+                try:
+                    context = self._chat_context(db, store, project_id, task_id, agent)
+                    history = store.agent_chat(project_id, task_id, agent)
+                    with metering.scope(sink=self._record, project_id=project_id, task_id=task_id), \
+                            metering.activity(agent, 'chat'):
+                        answer = ask_agent(self.author(agent), agent, context, history)
+                    reply = {'message': redact(answer)}
+                except ModelError as exc:
+                    reply = {'error': str(exc.code)}
+                except Exception as exc:  # noqa: BLE001 - a background job has no caller: record it instead of losing it
+                    reply = {'error': type(exc).__name__}
+                # Answered before the thread is open again, so a reader never sees it idle without the answer.
+                store.add_agent_chat(project_id, task_id, agent, 'agent', reply)
+        finally:
+            self._chatting.discard(key)
+
+    def _chat_context(self, db, store, project_id, task_id, agent):
+        """What the agent knows: the project, and the task with its own documents, or every task when on the project."""
+        project = ProjectRegistry(db).get(project_id)
+        spec = store.spec(project_id) or {}
+        context = dict(you=agent, project=dict(name=project.name, description=project.description,
+                                               spec=clip(spec.get('content') or '', SPEC_CLIP)))
+
+        def written(rows, limit):
+            return [dict(kind=d['kind'], title=d['title'], status=d['status'],
+                         **({'content': clip(d['content'], limit)} if d['content'] else {'reason': d['reason']}))
+                    for d in rows if d['agent'] == agent]
+
+        if task_id is None:
+            tasks = TaskEngine(db, ProjectRegistry(db)).list(project_id=project_id, limit=CHAT_TASKS)
+            context['tasks'] = [dict(task_id=t.task_id, title=t.title, status=str(t.status),
+                                     your_documents=written(store.documents(t.task_id), CHAT_CLIP // 4))
+                                for t in tasks]
+            if agent == 'lead':
+                context['intake_conversation'] = store.messages(project_id)[-CHAT_MESSAGES:]
+            return context
+        task = TaskEngine(db, ProjectRegistry(db)).get(task_id)
+        row = store.latest(task_id) or {}
+        context['task'] = dict(task_id=task_id, title=task.title, description=clip(task.description, CHAT_CLIP),
+                               status=str(task.status), run=dict(state=row.get('state'), phase=row.get('phase'),
+                                                                 wait_reason=row.get('wait_reason')) if row else None)
+        context['your_documents'] = written(store.documents(task_id), CHAT_CLIP)
+        if agent in ('programmer', 'qa', 'reviewer', 'lead'):
+            context['work_packages'] = store.public_packages(task_id)
+        if agent == 'lead':
+            context['task_conversation'] = store.messages(project_id, task_id)[-CHAT_MESSAGES:]
+        context['recent_events'] = [{k: v for k, v in e.items() if v is not None}
+                                    for e in store.recent_events(task_id, CHAT_EVENTS)]
+        return context
 
     # -- the conversation before a task exists ---------------------------------------------
 

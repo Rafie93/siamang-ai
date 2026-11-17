@@ -1,8 +1,10 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import AgentChat from '@/components/AgentChat.vue'
 import StatusChip from '@/components/StatusChip.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppDialog from '@/components/ui/AppDialog.vue'
+import AppTabs from '@/components/ui/AppTabs.vue'
 import AppTag from '@/components/ui/AppTag.vue'
 import { callsText, timeText, tokenCell, tokenExact, tokenTitle, usageAgentFor } from '@/domain/usage.js'
 import { request } from '@/services/api.js'
@@ -31,6 +33,27 @@ watch(
     }
   },
   { immediate: true },
+)
+// Asking the agent: about the task in front of it, or about the project it belongs to.
+const tab = ref('overview')
+const chatScope = ref('task')
+const chatAgent = computed(() => usageAgentFor(detail.value?.id))
+const chatProject = computed(() => office.stage.task?.project_id || office.projectId || '')
+const chatTask = computed(() => (chatScope.value === 'task' ? detail.value?.task_id || '' : ''))
+const tabs = computed(() =>
+  detail.value?.simulated
+    ? []
+    : [
+        { value: 'overview', label: 'Ringkasan' },
+        { value: 'chat', label: 'Tanya' },
+      ],
+)
+watch(
+  () => detail.value?.id,
+  () => {
+    tab.value = 'overview'
+    chatScope.value = detail.value?.task_id ? 'task' : 'project'
+  },
 )
 const close = () => {
   office.agentPopup = ''
@@ -70,7 +93,26 @@ const subtitle = computed(() =>
       />
     </template>
 
-    <div class="stack">
+    <AppTabs v-if="tabs.length" v-model="tab" :tabs="tabs" class="mb" />
+
+    <div v-if="tab === 'chat'" class="stack">
+      <AppTabs
+        v-model="chatScope"
+        :tabs="[
+          ...(detail.task_id ? [{ value: 'task', label: 'Task ini', note: detail.task }] : []),
+          { value: 'project', label: 'Proyek' },
+        ]"
+      />
+      <AgentChat
+        v-if="chatAgent && chatProject"
+        :agent="chatAgent"
+        :project-id="chatProject"
+        :task-id="chatTask"
+      />
+      <p v-else class="small muted">Pilih proyek dulu untuk bertanya kepada agen ini.</p>
+    </div>
+
+    <div v-else class="stack">
       <section aria-live="polite" class="agent-now" :data-working="detail.working">
         <div class="row">
           <span v-if="detail.working" class="spinner" aria-hidden="true" />

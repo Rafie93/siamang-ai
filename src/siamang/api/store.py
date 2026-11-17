@@ -35,6 +35,7 @@ WATCHED_WRITES = (
     ('api_task_ci', 'task', _PROJECT_OF_TASK, 'NEW.task_id', 'NULL', ('INSERT',)),  # written with INSERT OR REPLACE
     ('api_autonomy_decisions', 'autonomy', _PROJECT_OF_TASK, 'NEW.task_id', 'NULL', ('INSERT',)),
     ('api_messages', 'messages', 'NEW.project_id', 'NEW.task_id', 'NULL', ('INSERT',)),  # no task: the project's intake
+    ('api_agent_chats', 'agent_chat', 'NEW.project_id', 'NEW.task_id', 'NULL', ('INSERT',)),  # no task: a project thread
     ('api_task_drafts', 'drafts', 'NEW.project_id', 'NULL', 'NULL', _WRITES),
     ('api_project_repos', 'project', 'NEW.project_id', 'NULL', 'NULL', _WRITES),
     ('api_project_specs', 'project', 'NEW.project_id', 'NULL', 'NULL', _WRITES),
@@ -132,6 +133,11 @@ class RunStore:
                 position INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, task_id TEXT,
                 role TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL) STRICT''')
             conn.execute('CREATE INDEX IF NOT EXISTS api_project_messages ON api_messages(project_id, task_id)')
+            # The owner's questions to one agent, apart from api_messages: those are what the Lead and the run read.
+            conn.execute('''CREATE TABLE IF NOT EXISTS api_agent_chats (
+                position INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, task_id TEXT,
+                agent TEXT NOT NULL, role TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL) STRICT''')
+            conn.execute('CREATE INDEX IF NOT EXISTS api_agent_chat_threads ON api_agent_chats(project_id, task_id, agent)')
             conn.execute('''CREATE TABLE IF NOT EXISTS api_task_branches (
                 task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, branch TEXT NOT NULL, revises_task_id TEXT,
                 publication TEXT NOT NULL, error TEXT, commit_sha TEXT, pr_number INTEGER, pr_url TEXT,
@@ -272,6 +278,12 @@ class RunStore:
                                     'ORDER BY position LIMIT ?', (task_id, after, limit)).fetchall()
         return [dict(position=r['position'], run_id=r['run_id'], task_id=r['task_id'],
                      timestamp=r['timestamp'], **json.loads(r['payload'])) for r in rows]
+
+    def recent_events(self, task_id, count):
+        """The newest ``count`` events, oldest first."""
+        rows = self.db.conn.execute('SELECT * FROM api_run_events WHERE task_id=? ORDER BY position DESC LIMIT ?',
+                                    (task_id, count)).fetchall()
+        return [dict(timestamp=r['timestamp'], **json.loads(r['payload'])) for r in reversed(rows)]
 
     def save_documents(self, run_id, task_id, documents, basis=''):
         with self.db.transaction() as conn:
@@ -509,6 +521,18 @@ class RunStore:
     def messages(self, project_id, task_id=None):
         rows = self.db.conn.execute('SELECT * FROM api_messages WHERE project_id=? AND task_id IS ? ORDER BY position',
                                     (project_id, task_id)).fetchall()
+        return [dict(position=r['position'], role=r['role'], created_at=r['created_at'], **json.loads(r['payload']))
+                for r in rows]
+
+    def add_agent_chat(self, project_id, task_id, agent, role, payload):
+        with self.db.transaction() as conn:
+            conn.execute('INSERT INTO api_agent_chats(project_id,task_id,agent,role,payload,created_at) VALUES (?,?,?,?,?,?)',
+                         (project_id, task_id, agent, role, json.dumps(payload, ensure_ascii=False), now()))
+
+    def agent_chat(self, project_id, task_id, agent):
+        """One thread: the owner and one agent, about one task, or about the project when ``task_id`` is ``None``."""
+        rows = self.db.conn.execute('SELECT * FROM api_agent_chats WHERE project_id=? AND task_id IS ? AND agent=? '
+                                    'ORDER BY position', (project_id, task_id, agent)).fetchall()
         return [dict(position=r['position'], role=r['role'], created_at=r['created_at'], **json.loads(r['payload']))
                 for r in rows]
 

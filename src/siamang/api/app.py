@@ -21,7 +21,7 @@ from siamang.ids import new_id
 from siamang.jsondata import thaw
 from siamang.log import redact
 from siamang.projects import ProjectRegistry
-from siamang.projects.errors import ProjectError
+from siamang.projects.errors import ProjectError, ProjectNotFoundError
 from siamang.storage import Database, EventStore
 from siamang.tasks import TaskEngine, TaskRequest
 from siamang.tasks.errors import TaskError
@@ -524,6 +524,37 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
     async def task_message(task_id: str, body: MessageBody, principal=Depends(permission('run')), db=Depends(database)):
         scoped_task(db, task_id, principal)
         return runtime.post_task_message(task_id, body.content)
+
+    # The owner's questions to one agent. Asking changes nothing in the work, so a run need not be stopped for it.
+    def chat_project(db, project_id, principal):
+        try:
+            if principal.allows_project(project_id) and ProjectRegistry(db).get(project_id):
+                return
+        except ProjectNotFoundError:
+            pass
+        raise RuntimeRefusal('not_found', 404)
+
+    @app.get('/v0/tasks/{task_id}/agents/{agent}/chat')
+    async def task_agent_chat(task_id: str, agent: str, principal=Depends(permission('read')), db=Depends(database)):
+        task = scoped_task(db, task_id, principal)
+        return public(runtime.agent_chat(task.project_id, task_id, agent))
+
+    @app.post('/v0/tasks/{task_id}/agents/{agent}/chat', status_code=202)
+    async def task_agent_ask(task_id: str, agent: str, body: MessageBody, principal=Depends(permission('run')),
+                             db=Depends(database)):
+        task = scoped_task(db, task_id, principal)
+        return runtime.post_agent_chat(task.project_id, task_id, agent, body.content)
+
+    @app.get('/v0/projects/{project_id}/agents/{agent}/chat')
+    async def project_agent_chat(project_id: str, agent: str, principal=Depends(permission('read')), db=Depends(database)):
+        chat_project(db, project_id, principal)
+        return public(runtime.agent_chat(project_id, None, agent))
+
+    @app.post('/v0/projects/{project_id}/agents/{agent}/chat', status_code=202)
+    async def project_agent_ask(project_id: str, agent: str, body: MessageBody, principal=Depends(permission('submit')),
+                                db=Depends(database)):
+        chat_project(db, project_id, principal)
+        return runtime.post_agent_chat(project_id, None, agent, body.content)
 
     @app.post('/v0/tasks/{task_id}/publish', status_code=202)
     async def publish(task_id: str, principal=Depends(permission('approve')), db=Depends(database)):

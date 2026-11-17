@@ -67,7 +67,9 @@ export const useOfficeStore = defineStore('office', () => {
     live = ref(null),
     streaming = ref(false),
     agentPopup = ref(''),
-    bubbleAgent = ref('')
+    bubbleAgent = ref(''),
+    // The last chat thread with an agent that changed, as { project_id, task_id }: an open chat reloads when it is its own.
+    agentChatChange = ref(null)
   const taskError = ref(''),
     detailRequest = ref(0),
     backendOutdated = ref(false),
@@ -652,6 +654,8 @@ export const useOfficeStore = defineStore('office', () => {
       const shown = knownEvents(live.value?.events, data.task_id)
       if (shown.length) live.value = { ...live.value, events: mergeEvents(shown, [data.event]) }
     }
+    if (type === 'changed' && data.parts?.includes('agent_chat'))
+      agentChatChange.value = { project_id: data.project_id, task_id: data.task_id ?? null }
     if (!scopes.size) return
     for (const scope of scopes) frameScopes.add(scope)
     frameTimer ??= setTimeout(() => {
@@ -920,6 +924,7 @@ export const useOfficeStore = defineStore('office', () => {
     taskCount,
     approvalCount,
     agentPopup,
+    agentChatChange,
     bubbleAgent,
     agentBubble,
     agentInfo,

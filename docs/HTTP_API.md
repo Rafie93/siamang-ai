@@ -175,6 +175,21 @@ conversation with the Lead, and no task exists yet. The draft moves through `thi
 (for example `worker_busy`). Confirming twice returns the same task. Such a task skips the Lead's question round at run
 start. `POST /v0/tasks` stays available for an instruction that needs no conversation.
 
+### Asking one agent
+
+The owner can ask any agent (`lead`, `planner`, `analyst`, `designer`, `programmer`, `qa`, `reviewer`) about a task with
+`POST /v0/tasks/{task_id}/agents/{agent}/chat` (`run`), or about the project with
+`POST /v0/projects/{id}/agents/{agent}/chat` (`submit`). The body is `content`, and the request answers 202 with
+`state: thinking`. A `GET` on either path returns the thread: `items` (`role` is `owner` or `agent`, with `message`, or
+`error` when the agent could not answer), `thinking`, and `available`, which is `false` when the agent has no model.
+
+Asking changes nothing. The agent answers with its own model and persona from what it wrote, the task, the project spec,
+and the state of the run. It has no tools, never writes a document, and is not run on the pipeline's worker, so a run can
+be asked about while it is running. The thread is stored apart from the Lead's conversation, so the run never reads it.
+One question per thread is answered at a time (`409 agent_busy`), and an agent without a model returns
+`503 agent_has_no_model`. Each answer is metered as the agent's stage `chat`. The stream reports a new message as the part
+`agent_chat`.
+
 ### Several Programmers on one task
 
 After the design documents, the Analyst's model may divide the work in `work_packages` (a document bound to the design

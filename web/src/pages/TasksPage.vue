@@ -2,6 +2,7 @@
 import DesignEditsNotice from '@/components/DesignEditsNotice.vue'
 import { ArrowUpRight } from '@lucide/vue'
 import { computed, nextTick, ref, watch } from 'vue'
+import AgentChat from '@/components/AgentChat.vue'
 import ConversationThread from '@/components/ConversationThread.vue'
 import LeadQuestions from '@/components/LeadQuestions.vue'
 import MarkdownText from '@/components/MarkdownText.vue'
@@ -11,6 +12,8 @@ import TaskUsage from '@/components/TaskUsage.vue'
 import AppAlert from '@/components/ui/AppAlert.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
+import AppCollapse from '@/components/ui/AppCollapse.vue'
+import AppTabs from '@/components/ui/AppTabs.vue'
 import AppTag from '@/components/ui/AppTag.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import {
@@ -28,9 +31,14 @@ import {
   WAIT_TEXT,
   withoutOpenQuestions,
 } from '@/domain/labels.js'
+import { DOCUMENT_AGENTS } from '@/domain/documents.js'
 import { useOfficeStore } from '@/stores/office'
 
 const office = useOfficeStore()
+// Asking one agent about this task: open at any time, the run need not stop for it.
+const askOpen = ref(false)
+const askAgent = ref('lead')
+const agentTabs = DOCUMENT_AGENTS.map(a => ({ value: a.id, label: a.name }))
 const canRetry = computed(
   () => office.selected?.status === 'failed' || (office.stopped && !office.clarificationPending),
 )
@@ -309,6 +317,19 @@ watch(
       <AppButton variant="secondary" @click="office.go('reports')">Lihat laporan</AppButton>
       <AppButton variant="secondary" @click="office.openTaskDocuments">Lihat dokumen</AppButton>
     </div>
+
+    <AppCollapse class="mb" :open="askOpen" @toggle="askOpen = !askOpen">
+      <template #title>Tanya agen tentang task ini</template>
+      <div class="stack">
+        <AppTabs v-model="askAgent" :tabs="agentTabs" />
+        <AgentChat
+          :key="office.selectedId + askAgent"
+          :agent="askAgent"
+          :project-id="office.selected.project_id"
+          :task-id="office.selectedId"
+        />
+      </div>
+    </AppCollapse>
 
     <AppAlert
       v-if="canRedivide"
