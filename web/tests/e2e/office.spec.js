@@ -143,10 +143,15 @@ test('projects list opens the new project dialog in place and refuses a bad repo
   await expect(page.getByRole('button', { name: 'Task baru' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Proyek baru' }).first().click()
   const dialog = page.getByRole('dialog')
-  await expect(dialog).toContainText(
-    'Tautkan repo GitHub. Amang membaca isinya, lalu bertanya tentang kebutuhan Anda sebelum tim bekerja.',
-  )
+  await expect(dialog).toContainText('Mulai dari nol, tanpa GitHub dan tanpa CI.')
   await expect(page).toHaveURL(/\/projects$/)
+  // a new local project needs only a name
+  await expect(dialog.getByLabel('Repository GitHub')).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Buat proyek' })).toBeDisabled()
+  await dialog.getByLabel('Nama proyek').fill('Toko baru')
+  await expect(dialog.getByRole('button', { name: 'Buat proyek' })).toBeEnabled()
+  await dialog.getByLabel('Nama proyek').fill('')
+  await dialog.getByRole('tab', { name: 'Dari GitHub' }).click()
   await dialog.getByLabel('Repository GitHub').fill('bukan repo')
   await expect(dialog.getByRole('button', { name: 'Buat proyek' })).toBeDisabled()
   await dialog.getByLabel('Repository GitHub').fill('https://github.com/pemilik/nama-repo')

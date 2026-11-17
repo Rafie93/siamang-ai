@@ -115,6 +115,9 @@ class RunStore:
             conn.execute('''CREATE TABLE IF NOT EXISTS api_project_repos (
                 project_id TEXT PRIMARY KEY, repository TEXT NOT NULL, default_branch TEXT, private INTEGER,
                 state TEXT NOT NULL, error TEXT, updated_at TEXT NOT NULL) STRICT''')
+            if 'kind' not in {r['name'] for r in conn.execute('PRAGMA table_info(api_project_repos)')}:
+                # Every project made before local projects was linked to GitHub.
+                conn.execute("ALTER TABLE api_project_repos ADD COLUMN kind TEXT NOT NULL DEFAULT 'github'")
             conn.execute('''CREATE TABLE IF NOT EXISTS api_project_specs (
                 project_id TEXT PRIMARY KEY, state TEXT NOT NULL, content TEXT NOT NULL, error TEXT,
                 approved_by TEXT, approved_at TEXT, updated_at TEXT NOT NULL) STRICT''')
@@ -425,9 +428,10 @@ class RunStore:
         row = self.db.conn.execute('SELECT feature_id FROM api_task_features WHERE task_id=?', (task_id,)).fetchone()
         return row['feature_id'] if row else None
 
-    def add_repo(self, project_id, repository):
-        self.db.conn.execute('INSERT INTO api_project_repos(project_id,repository,state,updated_at) VALUES (?,?,?,?)',
-                             (project_id, repository, 'cloning', now()))
+    def add_repo(self, project_id, repository, kind='github'):
+        """``kind`` is ``github`` (a clone) or ``local`` (no remote; ``repository`` is empty)."""
+        self.db.conn.execute('INSERT INTO api_project_repos(project_id,repository,kind,state,updated_at) VALUES (?,?,?,?,?)',
+                             (project_id, repository, kind, 'cloning', now()))
 
     def update_repo(self, project_id, **fields):
         self._update('api_project_repos', 'project_id', project_id, fields)

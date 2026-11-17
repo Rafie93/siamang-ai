@@ -107,8 +107,12 @@ it('refuses malformed responses on the new routes', () => {
 })
 it('reports Git truthfully after approval', () => {
   const task = branch => ({ task_id: 't', status: 'completed', execution: {}, branch })
-  expect(visualStatus(task({ publication: 'published' }), true).label).toBe(
-    'Disetujui · PR terbuka di GitHub',
+  expect(
+    visualStatus(task({ publication: 'published', pr_url: 'https://github.com/o/r/pull/1' }), true).label,
+  ).toBe('Disetujui · PR terbuka di GitHub')
+  // a local project has no pull request: approved work is merged into main
+  expect(visualStatus(task({ publication: 'published', pr_url: null }), true).label).toBe(
+    'Disetujui · digabung ke main',
   )
   expect(visualStatus(task({ publication: 'failed' }), true).label).toBe('Disetujui · gagal masuk ke Git')
   expect(visualStatus(task(null), true).label).toBe('Proposal disetujui · belum diterapkan')

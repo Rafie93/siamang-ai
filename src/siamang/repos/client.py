@@ -1,4 +1,7 @@
-"""Write access to a project's GitHub repository: a fixed set of operations, nothing else.
+"""Write access to a project's repository, on GitHub or local only: a fixed set of operations, nothing else.
+
+A local project has no remote at all: it is created with :meth:`RepoClient.init_local`, and an approved branch
+is merged into its default branch by :meth:`RepoClient.merge_local`. Nothing in that path calls ``gh`` or a network.
 
 The read-only :mod:`siamang.git.client` stays as it is. This is the second Git boundary:
 
@@ -152,6 +155,75 @@ class RepoClient:
                   'commit', '--no-verify', '-m', 'Initial commit', cwd=root, code='commit_failed')
         self._git('push', '--no-verify', 'origin', f'refs/heads/{branch}:refs/heads/{branch}',
                   cwd=root, timeout=PUSH_TIMEOUT, code='push_failed')
+
+    # -- local projects: a repository with no remote ------------------------------------
+    #
+    # The working tree is the owner's only copy, so nothing here throws work away: uncommitted changes are stashed,
+    # ignored files (.env, node_modules) are left alone, and a merge that conflicts is aborted, never forced.
+
+    def init_local(self, root, title, *, author_name, author_email, branch='main'):
+        """A new, empty project: one commit on ``branch`` so every task has a base. Refuses a folder already in use."""
+        _check_base(branch)
+        root = Path(root)
+        if root.exists() and any(root.iterdir()):
+            raise RepoError('workspace_not_empty')
+        root.mkdir(parents=True, exist_ok=True)
+        self._git('init', '--quiet', '-b', branch, cwd=root, code='init_failed')
+        (root / 'README.md').write_text(f'# {title}\n', encoding='utf-8')
+        self._git('add', '--', 'README.md', cwd=root)
+        self._git('-c', f'user.name={author_name}', '-c', f'user.email={author_email}',
+                  'commit', '--no-verify', '-m', 'Initial commit', cwd=root, code='commit_failed')
+
+    def local_revision(self, root, branch) -> str | None:
+        """The commit of a local branch, or None when there is no such branch."""
+        _check_base(branch)
+        try:
+            return self._git('rev-parse', '--verify', '--quiet', f'refs/heads/{branch}^{{commit}}', cwd=root).strip()
+        except RepoError:
+            return None
+
+    def _save_uncommitted(self, root):
+        if self._git('status', '--porcelain', cwd=root).strip():
+            self._git('stash', 'push', '--include-untracked', '-m', 'siamang: perubahan yang belum di-commit',
+                      cwd=root, code='checkout_failed')
+
+    def _behind_only(self, root, branch, base) -> bool:
+        """True when ``branch`` holds no commit that ``base`` lacks, so moving it to ``base`` loses nothing."""
+        try:
+            self._git('merge-base', '--is-ancestor', f'refs/heads/{branch}', f'refs/heads/{base}', cwd=root)
+        except RepoError:
+            return False
+        return True
+
+    def prepare_local(self, root, branch, base):
+        """Put a local project on ``branch``: as it is when it exists, else fresh from ``base``."""
+        _check_branch(branch)
+        _check_base(base)
+        self._save_uncommitted(root)
+        if self.local_revision(root, branch) and not self._behind_only(root, branch, base):
+            self._git('checkout', '--force', branch, '--', cwd=root, code='checkout_failed')
+        elif self.local_revision(root, base):
+            # A new branch, or one with no commit of its own (a run that stopped early): it starts from the newest base.
+            self._git('checkout', '--force', '-B', branch, f'refs/heads/{base}', '--', cwd=root, code='checkout_failed')
+        else:
+            raise RepoError('base_branch_missing')
+
+    def merge_local(self, root, branch, *, base, message, author_name, author_email) -> str:
+        """The owner's approval lands the branch on ``base``. A conflict is aborted and reported, never resolved here."""
+        _check_branch(branch)
+        _check_base(base)
+        self._save_uncommitted(root)
+        self._git('checkout', '--force', base, '--', cwd=root, code='checkout_failed')
+        try:
+            self._git('-c', f'user.name={author_name}', '-c', f'user.email={author_email}', 'merge', '--no-ff',
+                      '--no-edit', '--no-verify', '-m', message, f'refs/heads/{branch}', cwd=root, code='merge_conflict')
+        except RepoError:
+            try:
+                self._git('merge', '--abort', cwd=root)
+            except RepoError:
+                pass
+            raise
+        return self._git('rev-parse', 'HEAD', cwd=root).strip()
 
     def files(self, root, limit=300):
         return self._git('ls-files', '-z', cwd=root).split('\0')[:-1][:limit]

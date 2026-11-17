@@ -12,13 +12,7 @@ import AppCard from '@/components/ui/AppCard.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppTabs from '@/components/ui/AppTabs.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
-import {
-  errorText,
-  openQuestions,
-  projectStep,
-  PROJECT_STEPS,
-  withoutOpenQuestions,
-} from '@/domain/labels.js'
+import { errorText, openQuestions, projectStep, projectSteps, withoutOpenQuestions } from '@/domain/labels.js'
 import { useOfficeStore } from '@/stores/office'
 
 const office = useOfficeStore()
@@ -27,6 +21,7 @@ const id = computed(() => route.params.id)
 const project = computed(() => office.portfolio.find(p => p.project_id === id.value) || null)
 const intake = computed(() => (office.projectId === id.value ? office.intake : null))
 const step = computed(() => projectStep(project.value))
+const local = computed(() => project.value?.repository?.kind === 'local')
 const state = computed(() => intake.value?.spec?.state)
 const messages = computed(() => intake.value?.messages || [])
 const questions = computed(() => (state.value === 'gathering' ? openQuestions(messages.value) : []))
@@ -94,7 +89,13 @@ const send = async text => {
           </span>
           <div>
             <h2 class="page-title" style="font-size: 17px">{{ project.name }}</h2>
-            <p v-if="project.repository" class="card-subtitle">
+            <p v-if="local" class="card-subtitle">
+              Proyek lokal, tanpa GitHub · folder <code>workspaces/{{ project.project_id }}</code>
+              <template v-if="project.repository.default_branch">
+                · branch utama <code>{{ project.repository.default_branch }}</code>
+              </template>
+            </p>
+            <p v-else-if="project.repository" class="card-subtitle">
               <a
                 :href="`https://github.com/${project.repository.repository}`"
                 target="_blank"
@@ -115,7 +116,7 @@ const send = async text => {
       </template>
       <ol v-if="project.repository" class="project-steps" aria-label="Tahap penyiapan proyek">
         <li
-          v-for="(name, i) in PROJECT_STEPS"
+          v-for="(name, i) in projectSteps(project)"
           :key="name"
           :data-state="stepState(i)"
           :aria-current="i === step.step ? 'step' : undefined"
@@ -132,7 +133,9 @@ const send = async text => {
     <AppAlert v-if="failure" tone="error" class="mb" title="Penyiapan terhenti">
       {{ errorText(failure) }}
       <template v-if="intake?.repository?.state === 'failed'" #actions>
-        <AppButton variant="danger" size="sm" @click="office.retryClone">Coba clone lagi</AppButton>
+        <AppButton variant="danger" size="sm" @click="office.retryClone">{{
+          local ? 'Coba siapkan lagi' : 'Coba clone lagi'
+        }}</AppButton>
       </template>
     </AppAlert>
 

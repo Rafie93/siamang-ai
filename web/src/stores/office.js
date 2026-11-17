@@ -75,7 +75,7 @@ export const useOfficeStore = defineStore('office', () => {
     projectError = ref(''),
     draft = ref(null),
     leadBusy = ref(false)
-  const newProject = ref({ name: '', repository: '' }),
+  const newProject = ref({ source: 'local', name: '', repository: '' }),
     intake = ref(null),
     intakeDraft = ref(''),
     taskMessages = ref([]),
@@ -117,15 +117,18 @@ export const useOfficeStore = defineStore('office', () => {
     failed: 'Terhenti',
   }
   async function createProject() {
-    if (!newProject.value.name.trim() || !newProject.value.repository.trim() || !can('submit')) return
+    // A local project has no repository: Siamang starts its own Git repository, with no GitHub and no CI.
+    const local = newProject.value.source === 'local'
+    if (!newProject.value.name.trim() || (!local && !newProject.value.repository.trim()) || !can('submit'))
+      return
     busy.value = true
     projectError.value = ''
     try {
       const p = await post('/projects', {
         name: newProject.value.name.trim(),
-        repository: newProject.value.repository.trim(),
+        ...(local ? {} : { repository: newProject.value.repository.trim() }),
       })
-      newProject.value = { name: '', repository: '' }
+      newProject.value = { source: newProject.value.source, name: '', repository: '' }
       projectDialog.value = false
       projectId.value = p.project_id
       router.push({ name: 'project-detail', params: { id: p.project_id } })

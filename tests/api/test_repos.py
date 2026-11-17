@@ -23,6 +23,7 @@ from tests.api.test_http import TOKENS, headers
 from tests.support.analyst import sample_project
 from tests.support.loop import CLEAN
 from tests.support.programmer import INSTRUCTION, change, make_model, reply
+from tests.support.reviewer import VALIDATION
 
 REPOSITORY = 'rafie/landing'
 SECRET_DOC = 'PRD-RAHASIA-TIDAK-BOLEH-DI-REPO'
@@ -682,3 +683,156 @@ def test_a_revision_reads_its_open_pull_request_then_main_after_it_closes(world)
         pull = world.github.pulls[branch['branch']]
         world.github.pulls[branch['branch']] = PullRequest(pull.number, pull.url, 'CLOSED')
         assert main[:12] in _lead_view_of_revision(client, world, project_id, first)
+
+
+# -- local projects: a new repository with no remote, no gh, no CI ----------------------------------------------------
+
+class NoRemote(FakeGitHub):
+    """A local project must never reach GitHub: any call that would is a test failure, not a fake answer."""
+
+    def _refuse(self, *args, **kwargs):
+        raise AssertionError('a local project reached GitHub')
+
+    info = clone = seed_empty = identity = find_pull_request = open_pull_request = _refuse
+    pull_request_details = merge_pull_request = ci_runs = ci_failed_log = refresh = revision = push = prepare = _refuse
+
+
+def local_world(world):
+    world.github = NoRemote(world.base)
+    world.programmer = make_model(CLEAN)
+    return world
+
+
+# A new project has no files to observe: the specification names the ones the owner asked for.
+LOCAL_READY = READY | {'spec': '# Spesifikasi\nValidasi login di `backend/routes/validation.py`, test di `tests/test_validation.py`, '
+                                'rute tambahan di `backend/routes/revisi.py` dan `tests/test_revisi.py`.'}
+
+
+def new_local_project(client, world, name='Toko Baru'):
+    world.lead_replies[:0] = [LOCAL_READY]
+    response = client.post('/v0/projects', headers=headers(), json={'name': name})
+    assert response.status_code == 202, response.text
+    project_id = response.json()['project_id']
+    state = spec_state(client, project_id, 'pending_approval')
+    assert client.post(f'/v0/projects/{project_id}/intake/approve', headers=headers('approver')).status_code == 200
+    return project_id, state
+
+
+def workspace(world, project_id):
+    return world.settings.database.parent / 'workspaces' / project_id
+
+
+def test_a_new_local_project_starts_with_its_own_repository_and_no_remote(world):
+    local_world(world)
+    with TestClient(world.app()) as client:
+        project_id, state = new_local_project(client, world)
+        root = workspace(world, project_id)
+        assert state['repository']['kind'] == 'local' and state['repository']['repository'] == ''
+        assert state['repository']['default_branch'] == 'main' and state['repository']['state'] == 'ready'
+        assert git('remote', cwd=root) == '' and git('ls-files', cwd=root) == 'README.md'
+        assert git('log', '--format=%an <%ae>', cwd=root) == 'Siamang <siamang@localhost>'
+        assert (root / 'README.md').read_text() == '# Toko Baru\n'
+        seen = json.loads(world.lead.requests[0].messages[-1].content.split('\n', 1)[1])
+        assert seen['project']['source'] == 'new_local_project' and seen['repository']['tracked_files'] == ['README.md']
+        listed = client.get('/v0/portfolio', headers=headers()).json()['items'][0]['repository']
+        assert listed['kind'] == 'local'
+        # a blank repository field is a local project too; a malformed one is still refused
+        assert client.post('/v0/projects', headers=headers(), json={'name': 'B', 'repository': '  '}).status_code == 202
+        assert client.post('/v0/projects', headers=headers(), json={'name': 'C', 'repository': 'x'}).status_code == 422
+
+
+def test_an_approved_local_task_is_merged_into_main_without_a_pull_request_or_ci(world):
+    local_world(world)
+    with TestClient(world.app()) as client:
+        project_id, _ = new_local_project(client, world)
+        root = workspace(world, project_id)
+        before = git('rev-parse', 'main', cwd=root)
+        task_id = task(client, project_id)
+        branch = deliver(client, world, task_id)
+
+        assert branch['publication'] == 'published', branch
+        assert branch['pr_number'] is None and branch['pr_url'] is None and len(branch['commit_sha']) == 40
+        assert git('rev-parse', '--abbrev-ref', 'HEAD', cwd=root) == 'main'
+        assert git('rev-parse', 'main^1', cwd=root) == before and git('rev-parse', 'main^2', cwd=root) == branch['commit_sha']
+        assert (root / VALIDATION).is_file() and git('status', '--porcelain', cwd=root) == ''
+        assert 'disetujui oleh approver' in git('log', '-1', '--format=%B', 'main', cwd=root)
+        assert snapshot(client, task_id).get('ci') in (None, {}) and git('remote', cwd=root) == ''
+
+
+def test_a_local_revision_starts_from_main_with_the_earlier_work(world):
+    local_world(world)
+    answers = [CLEAN, _new_file('revisi')]
+    world.programmer = make_model(lambda model, request: answers.pop(0))
+    with TestClient(world.app()) as client:
+        project_id, _ = new_local_project(client, world)
+        root = workspace(world, project_id)
+        first = deliver(client, world, task(client, project_id))
+        second = deliver(client, world, task(client, project_id, 'req_revision', revises_task_id=first['task_id']))
+        assert second['publication'] == 'published', second
+        assert second['branch'] != first['branch']
+        assert git('merge-base', '--is-ancestor', first['commit_sha'], second['commit_sha'], cwd=root) == ''
+        assert (root / VALIDATION).is_file() and (root / 'backend/routes/revisi.py').is_file()
+
+
+def test_owner_edits_in_a_local_workspace_are_stashed_never_lost(world):
+    local_world(world)
+    with TestClient(world.app()) as client:
+        project_id, _ = new_local_project(client, world)
+        root = workspace(world, project_id)
+        (root / '.gitignore').write_text('.env\n')  # committed by an earlier task
+        git('add', '.gitignore', cwd=root)
+        git('commit', '-m', 'ignore', cwd=root)
+        (root / 'README.md').write_text('# Catatan saya\n')
+        (root / 'ide.txt').write_text('jangan hilang\n')
+        (root / '.env').write_text('KUNCI=1\n')
+        branch = deliver(client, world, task(client, project_id))
+        assert branch['publication'] == 'published', branch
+        assert (root / '.env').read_text() == 'KUNCI=1\n'  # ignored files are left alone
+        stash = git('stash', 'list', cwd=root)
+        assert 'siamang: perubahan yang belum di-commit' in stash
+        assert 'ide.txt' in git('show', '--name-only', '--format=', 'stash@{0}^3', cwd=root)
+        git('stash', 'pop', cwd=root)
+        assert (root / 'ide.txt').read_text() == 'jangan hilang\n' and (root / 'README.md').read_text() == '# Catatan saya\n'
+
+
+def test_a_failed_local_setup_can_be_retried_and_never_removes_real_work(world, tmp_path):
+    local_world(world)
+    client_repos = world.github
+    with pytest.raises(RepoError) as refused:
+        busy = tmp_path / 'busy'
+        busy.mkdir()
+        (busy / 'kerja.txt').write_text('x')
+        client_repos.init_local(busy, 'X', author_name='a', author_email='a@a')
+    assert refused.value.code == 'workspace_not_empty' and (busy / 'kerja.txt').read_text() == 'x'
+
+    with TestClient(world.app()) as client:
+        failing = client_repos.init_local
+        client_repos.init_local = lambda *a, **k: (_ for _ in ()).throw(RepoError('init_failed'))
+        project_id = client.post('/v0/projects', headers=headers(), json={'name': 'Gagal'}).json()['project_id']
+        state = until(lambda: intake(client, project_id)['repository']['state'] == 'failed' and intake(client, project_id),
+                      'setup failed')
+        assert state['repository']['error'] == 'init_failed'
+        client_repos.init_local = failing
+        world.lead_replies.append(LOCAL_READY)
+        assert client.post(f'/v0/projects/{project_id}/clone', headers=headers()).status_code == 202
+        spec_state(client, project_id, 'pending_approval')
+        assert git('ls-files', cwd=workspace(world, project_id)) == 'README.md'
+
+
+def test_a_local_branch_with_no_commit_of_its_own_catches_up_with_main(world, tmp_path):
+    repos = NoRemote(world.base)
+    root = tmp_path / 'proyek'
+    repos.init_local(root, 'X', author_name='a', author_email='a@a')
+    repos.prepare_local(root, 'siamang/lama', 'main')  # a run that stopped before any commit
+    repos.prepare_local(root, 'siamang/baru', 'main')
+    (root / 'b.txt').write_text('b\n')
+    repos.commit_paths(root, 'siamang/baru', base='main', paths=['b.txt'], message='b', author_name='a', author_email='a@a')
+    merged = repos.merge_local(root, 'siamang/baru', base='main', message='m', author_name='a', author_email='a@a')
+    repos.prepare_local(root, 'siamang/lama', 'main')
+    assert git('rev-parse', 'HEAD', cwd=root) == merged and (root / 'b.txt').is_file()
+    # a branch with its own commit is kept as it is
+    (root / 'c.txt').write_text('c\n')
+    repos.commit_paths(root, 'siamang/lama', base='main', paths=['c.txt'], message='c', author_name='a', author_email='a@a')
+    own = git('rev-parse', 'HEAD', cwd=root)
+    repos.prepare_local(root, 'siamang/lama', 'main')
+    assert git('rev-parse', 'HEAD', cwd=root) == own

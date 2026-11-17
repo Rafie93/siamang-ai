@@ -127,6 +127,16 @@ def task_root(store, task):
     return ProjectRegistry(store.db).get(task.project_id).root_path
 
 
+# Who commits in a local project: there is no GitHub account to name.
+LOCAL_AUTHOR = ('Siamang', 'siamang@localhost')
+LOCAL_SEED_FILES = frozenset({'.git', 'README.md'})  # all a local project holds before it is ready
+
+
+def is_local(repo):
+    """A project with its own Git repository and no remote: no clone, no push, no pull request, no CI."""
+    return bool(repo) and repo.get('kind') == 'local'
+
+
 def conversation_tail(messages, limit=1_000):
     """The latest questions and answers, newest kept, for the Programmer's bounded input."""
     lines = []
@@ -1357,23 +1367,33 @@ class Runtime:
         if publish:
             self._submit_publish(run_id)
 
-    # -- GitHub projects -----------------------------------------------------------------
+    # -- projects: a GitHub clone, or a new local repository ------------------------------------
 
     def _workspace(self, project_id):
         return self.settings.database.parent / 'workspaces' / project_id
 
-    def create_project(self, name, repository):
-        """Register now, clone in the background. The clone directory always belongs to Siamang."""
+    def create_project(self, name, repository=None):
+        """Register now, set up in the background. The workspace directory always belongs to Siamang.
+
+        With a repository it is cloned from GitHub. Without one, the project starts empty with a local Git
+        repository and no remote: approved work is merged there, and nothing reaches GitHub or a CI.
+        """
         with Database(self.settings.database) as db:
             store, registry = RunStore(db), ProjectRegistry(db)
             with db.transaction():
                 project_id = new_id('project')
                 project = registry.register(name=name, project_id=project_id, root_path=str(self._workspace(project_id)),
-                                            metadata={'repository': repository})
-                store.add_repo(project_id, repository)
+                                            metadata={'repository': repository} if repository else {'source': 'local'})
+                store.add_repo(project_id, repository or '', 'github' if repository else 'local')
                 store.set_spec(project_id, state='thinking')
-        self._submit_background(self._clone, project.project_id, repository)
+        self._setup(project.project_id, repository)
         return project
+
+    def _setup(self, project_id, repository):
+        if repository:
+            self._submit_background(self._clone, project_id, repository)
+        else:
+            self._submit_background(self._init_local, project_id)
 
     def _submit_background(self, job, *args):
         if self._closing or not self._background:
@@ -1391,7 +1411,29 @@ class Runtime:
             with db.transaction():
                 store.update_repo(project_id, state='cloning', error=None)
                 store.set_spec(project_id, state='thinking')
-        self._submit_background(self._clone, project_id, repo['repository'])
+        self._setup(project_id, None if is_local(repo) else repo['repository'])
+
+    def _init_local(self, project_id):
+        with Database(self.settings.database) as db:
+            store = RunStore(db)
+            dest = self._workspace(project_id)
+            try:
+                # A repository with its first commit was set up before an interruption: it only missed being marked ready.
+                if not ((dest / '.git').exists() and self._repos.local_revision(dest, 'main')):
+                    # Only a failed attempt is removed, and only while it holds nothing but what that attempt wrote.
+                    if dest.exists() and {p.name for p in dest.iterdir()} <= LOCAL_SEED_FILES:
+                        shutil.rmtree(dest)
+                    name, email = LOCAL_AUTHOR
+                    self._repos.init_local(dest, ProjectRegistry(db).get(project_id).name,
+                                           author_name=name, author_email=email)
+            except RepoError as exc:
+                with db.transaction():
+                    store.update_repo(project_id, state='failed', error=exc.code)
+                    store.set_spec(project_id, state='failed', error=exc.code)
+                return
+            with db.transaction():
+                store.update_repo(project_id, default_branch='main', private=1, state='ready', error=None)
+            self._lead_turn(db, project_id)
 
     def _clone(self, project_id, repository):
         with Database(self.settings.database) as db:
@@ -1445,10 +1487,12 @@ class Runtime:
                 raise RepoError('lead_has_no_model')
             history = store.messages(project_id)
             rounds = sum(1 for m in history if m['role'] == 'lead')
-            project, spec = ProjectRegistry(db).get(project_id), store.spec(project_id)
+            project, spec, repo = ProjectRegistry(db).get(project_id), store.spec(project_id), store.repo(project_id)
+            # A local project is new: its repository holds only the first README, so there is nothing to read yet.
             reply = ask_lead(router, INTAKE_PROMPT, dict(
-                project=dict(name=project.name, repository=store.repo(project_id)['repository']),
-                repository=read_latest(self._repos, project.root_path, store.repo(project_id)['default_branch']),
+                project=dict(name=project.name, repository=repo['repository'] or None,
+                             source='new_local_project' if is_local(repo) else 'github_repository'),
+                repository=read_latest(self._repos, project.root_path, repo['default_branch'], local=is_local(repo)),
                 conversation=history,
                 current_spec=spec['content'], rounds_left=max(MAX_INTAKE_ROUNDS - rounds, 0)))
         except (ModelError, RepoError) as exc:
@@ -1475,7 +1519,7 @@ class Runtime:
             return store.spec(project_id)
 
     def assign_branch(self, store, task, revises_task_id):
-        """Every task of a GitHub project gets a branch. A run decides later if a revision can reuse its base's."""
+        """Every task of a GitHub or local project gets a branch. A run decides later if a revision can reuse its base's."""
         store.add_branch(task.task_id, task.project_id, branch_name(task.task_id, task.title or task.description),
                          revises_task_id)
 
@@ -1484,6 +1528,9 @@ class Runtime:
         if not row:
             raise RepoError('task_has_no_branch')
         branch = row['branch']
+        if is_local(repo):  # an approved base is already merged: a revision starts fresh from the default branch
+            self._repos.prepare_local(task_root(store, task), branch, repo['default_branch'])
+            return
         if row['revises_task_id']:
             base = store.branch(row['revises_task_id'])
             pull = self._repos.find_pull_request(repo['repository'], base['branch'])
@@ -1526,25 +1573,33 @@ class Runtime:
                     raise RepoError('not_approved')
                 _, _, loop = self.load_bundle(row)
                 patch, repo, branch = loop.final_patch, store.repo(task.project_id), store.branch(task_id)
-                root = task_root(store, task)
-                self._repos.prepare(root, branch['branch'], repo['default_branch'])
+                root, local = task_root(store, task), is_local(repo)
+                (self._repos.prepare_local if local else self._repos.prepare)(root, branch['branch'], repo['default_branch'])
                 title = (task.title or task.description).splitlines()[0][:72]
                 sha = branch['commit_sha']
-                if not sha:  # a retry after the push only still owes the pull request
+                if not sha:  # a retry after the push (or the local commit) only still owes the pull request (or the merge)
                     paths = write_changes(root, patch)
-                    name, email = self._repos.identity()
+                    name, email = LOCAL_AUTHOR if local else self._repos.identity()
                     groups = commit_groups(store.work_packages(run_id), patch) or [(title, paths)]
                     for label, group in groups:
                         self._repos.commit_paths(root, branch['branch'], base=repo['default_branch'], paths=group,
                                            message=f'{label}\n\n{patch.summary}', author_name=name, author_email=email)
-                    sha = self._repos.push(root, branch['branch'])
+                    sha = self._repos.local_revision(root, branch['branch']) if local else self._repos.push(root, branch['branch'])
                     with db.transaction():
                         store.update_branch(task_id, commit_sha=sha)
-                pull = self._repos.find_pull_request(repo['repository'], branch['branch'])
-                if pull is None or pull.state != 'OPEN':
-                    pull = self._repos.open_pull_request(repo['repository'], branch['branch'], base=repo['default_branch'],
-                                                         title=title, body=_pull_request_body(task, patch, loop, recover.debt_of(row['report']),
-                                                                                              row['decision_actor'], row['report']))
+                if local:
+                    # The owner's approval is the merge: there is no pull request, and no CI to wait for.
+                    name, email = LOCAL_AUTHOR
+                    self._repos.merge_local(root, branch['branch'], base=repo['default_branch'], author_name=name,
+                                            author_email=email, message=f"{title}\n\nBranch {branch['branch']}, "
+                                                                        f"disetujui oleh {row['decision_actor']}.")
+                    pull = None
+                else:
+                    pull = self._repos.find_pull_request(repo['repository'], branch['branch'])
+                    if pull is None or pull.state != 'OPEN':
+                        pull = self._repos.open_pull_request(repo['repository'], branch['branch'], base=repo['default_branch'],
+                                                             title=title, body=_pull_request_body(task, patch, loop, recover.debt_of(row['report']),
+                                                                                                  row['decision_actor'], row['report']))
             except RepoError as exc:
                 with db.transaction():
                     store.update_branch(task_id, publication='failed', error=exc.code)
@@ -1554,7 +1609,9 @@ class Runtime:
             else:
                 with db.transaction():
                     store.update_branch(task_id, publication='published', error=None, commit_sha=sha,
-                                        pr_number=pull.number, pr_url=pull.url)
+                                        pr_number=pull.number if pull else None, pr_url=pull.url if pull else None)
+                if pull is None:
+                    return
                 store.set_ci(task_id, sha, 'watching')
                 if self._ci_pool and not self._closing:
                     self._ci_pool.submit(self._watch_ci, task_id)
@@ -1585,7 +1642,7 @@ class Runtime:
         """The branch a revision will join: while its pull request is open, the newest work is there."""
         revises = draft['options'].get('revises_task_id')
         base = store.branch(revises) if revises else None
-        if not base:
+        if not base or is_local(repo):  # a local base is merged on approval: the newest work is the default branch
             return None
         try:
             pull = self._repos.find_pull_request(repo['repository'], base['branch'])
@@ -1607,7 +1664,7 @@ class Runtime:
                 if repo:
                     context |= dict(project_spec=(store.spec(project_id) or {}).get('content', ''),
                                     repository=read_latest(self._repos, project.root_path, repo['default_branch'],
-                                                           self._open_revision(store, repo, draft)))
+                                                           self._open_revision(store, repo, draft), local=is_local(repo)))
                 reply = ask_lead(self.author('lead'), DRAFT_PROMPT, context)
                 if reply.ready and not reply.spec.strip():
                     raise RepoError('lead_returned_empty_brief')

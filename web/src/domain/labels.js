@@ -41,6 +41,14 @@ export const ERROR_TEXT = {
   no_design_edits: 'Tidak ada perubahan diagram yang belum dikirim.',
   diagram_save_failed: 'Diagram gagal disimpan. Coba lagi.',
   push_failed: 'Push ke GitHub gagal.',
+  init_failed: 'Repositori Git lokal gagal dibuat. Periksa bahwa git terpasang, lalu coba lagi.',
+  workspace_not_empty:
+    'Folder kerja proyek ini sudah berisi file lain, jadi Siamang tidak menimpanya. Periksa folder itu dulu.',
+  merge_conflict:
+    'Perubahan task ini bentrok dengan isi main sekarang. Tidak ada yang digabung; buat task revisi untuk menyesuaikannya.',
+  checkout_failed: 'Branch task tidak bisa disiapkan di folder kerja.',
+  commit_failed: 'Commit gagal dibuat.',
+  base_branch_missing: 'Branch utama proyek tidak ditemukan.',
   pull_request_failed: 'Commit sudah terkirim, tetapi PR gagal dibuka.',
 }
 export const errorText = code => ERROR_TEXT[code] || code || 'Terjadi kesalahan.'
@@ -184,12 +192,20 @@ export function repositorySlug(text) {
 export function projectStep(p) {
   const repo = p?.repository
   if (!repo) return { step: 4, text: 'Siap menerima task', action: false }
+  const local = repo.kind === 'local'
   if (repo.state === 'failed')
-    return { step: 0, text: 'Gagal menautkan repo', error: repo.error, action: true }
-  if (repo.state === 'cloning') return { step: 0, text: 'Menautkan repo…', action: false }
+    return {
+      step: 0,
+      text: local ? 'Gagal menyiapkan proyek' : 'Gagal menautkan repo',
+      error: repo.error,
+      action: true,
+    }
+  if (repo.state === 'cloning')
+    return { step: 0, text: local ? 'Menyiapkan folder proyek…' : 'Menautkan repo…', action: false }
   const state = p.spec_state
   if (state === 'failed') return { step: 1, text: 'Amang terhenti', action: true }
-  if (state === 'thinking') return { step: 1, text: 'Amang membaca dan berpikir…', action: false }
+  if (state === 'thinking')
+    return { step: 1, text: local ? 'Amang sedang berpikir…' : 'Amang membaca dan berpikir…', action: false }
   if (state === 'gathering') return { step: 2, text: 'Amang menunggu jawaban Anda', action: true }
   if (state === 'pending_approval') return { step: 3, text: 'Spesifikasi menunggu persetujuan', action: true }
   if (state === 'approved') return { step: 4, text: 'Siap menerima task', action: false }
@@ -202,6 +218,15 @@ export const PROJECT_STEPS = [
   'Setujui spesifikasi',
   'Siap menerima task',
 ]
+// A local project starts empty: there is no repo to link or read.
+export const LOCAL_PROJECT_STEPS = [
+  'Siapkan folder',
+  'Amang bertanya',
+  'Jawab pertanyaan',
+  'Setujui spesifikasi',
+  'Siap menerima task',
+]
+export const projectSteps = p => (p?.repository?.kind === 'local' ? LOCAL_PROJECT_STEPS : PROJECT_STEPS)
 
 const short = q => (q.length > 90 ? q.slice(0, 87) + '…' : q)
 /** The answers as one message: the Lead reads which question each one belongs to. */

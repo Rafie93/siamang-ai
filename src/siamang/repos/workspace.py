@@ -71,14 +71,16 @@ def read_context(client, root) -> dict:
     return {'tracked_files': names, 'file_samples': samples}
 
 
-def read_latest(client, root, default_branch, branch=None) -> dict:
-    """What the Lead sees before a task runs: the remote's newest state, never whichever branch the clone is on.
+def read_latest(client, root, default_branch, branch=None, *, local=False) -> dict:
+    """What the Lead sees before a task runs: the newest state, never whichever branch the clone is on.
 
-    A failed fetch still answers from the last known state, and says so.
+    On GitHub that is the remote's state, and a failed fetch still answers from the last known one, and says so.
+    A local project has nothing to fetch: its own branches are the newest state.
     """
     root = Path(root)
-    fetched = client.refresh(root)
-    commit = (client.revision(root, branch) if branch else None) or client.revision(root, default_branch)
+    fetched = True if local else client.refresh(root)
+    revision = client.local_revision if local else client.revision
+    commit = (revision(root, branch) if branch else None) or revision(root, default_branch)
     if commit is None:
         return read_context(client, root) | {'fetched_latest': fetched, 'revision': None}
     files = client.tree(root, commit)

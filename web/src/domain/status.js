@@ -40,8 +40,9 @@ export function visualStatus(task, connected = true, now = Date.now()) {
     }
   const completed =
     {
-      published: 'Disetujui · PR terbuka di GitHub',
-      publishing: 'Disetujui · sedang commit dan push',
+      // A local project has no pull request: its approved work is merged straight into main.
+      published: task.branch?.pr_url ? 'Disetujui · PR terbuka di GitHub' : 'Disetujui · digabung ke main',
+      publishing: 'Disetujui · sedang dimasukkan ke Git',
       failed: 'Disetujui · gagal masuk ke Git',
     }[task.branch?.publication] || 'Proposal disetujui · belum diterapkan'
   return {

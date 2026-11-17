@@ -91,9 +91,10 @@ class FeatureBody(BaseModel):
 
 
 class NewProject(BaseModel):
+    """No repository (absent, null, or blank) makes a new local project: its own Git repository, no remote."""
     model_config = ConfigDict(extra='forbid', strict=True)
     name: str = Field(min_length=1, max_length=120)
-    repository: str = Field(max_length=200)
+    repository: str | None = Field(default=None, max_length=200)
 
 
 class AgentModelBody(BaseModel):
@@ -271,7 +272,8 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
     async def new_project(body: NewProject, principal=Depends(permission('submit'))):
         if not principal.allows_project('*'):  # a new project is outside any finite scope
             raise RuntimeRefusal('forbidden', 403)
-        return public(runtime.create_project(body.name.strip(), repository_name(body.repository)).to_dict())
+        repository = repository_name(body.repository) if (body.repository or '').strip() else None
+        return public(runtime.create_project(body.name.strip(), repository).to_dict())
 
     @app.post('/v0/projects/{project_id}/clone', status_code=202)
     async def retry_clone(project_id: str, principal=Depends(permission('submit'))):

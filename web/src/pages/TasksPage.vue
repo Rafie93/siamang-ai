@@ -125,15 +125,20 @@ watch(
       <div>
         <dt>Git</dt>
         <dd>
+          <template
+            v-if="office.selected.branch.publication === 'published' && !office.selected.branch.pr_url"
+            >Digabung ke <code>main</code> (lokal) · commit
+            <code>{{ office.selected.branch.commit_sha?.slice(0, 12) }}</code></template
+          >
           <a
-            v-if="office.selected.branch.publication === 'published'"
+            v-else-if="office.selected.branch.publication === 'published'"
             :href="office.selected.branch.pr_url"
             target="_blank"
             rel="noopener noreferrer"
             >Buka PR #{{ office.selected.branch.pr_number }} ↗</a
           >
           <template v-else-if="office.selected.branch.publication === 'publishing'"
-            >Sedang commit dan push…</template
+            >Sedang dimasukkan ke Git…</template
           >
           <template v-else-if="office.selected.branch.publication === 'failed'">
             Gagal: {{ office.selected.branch.error }}

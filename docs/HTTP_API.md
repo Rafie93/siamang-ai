@@ -140,12 +140,25 @@ another language, such as a JSON response in `api_spec`, is never a block.
 At the gate, approving sends the edits. Edited blocks reach the Programmer first, marked `owner_edited`, and take
 precedence over the rest of the design.
 
-## GitHub projects
+## Projects: from GitHub, or new and local
 
-`POST /v0/projects` (`submit` permission and an unrestricted `*` scope; body `name`, `repository` as
-`owner/name` or a github.com URL) registers a project and clones it in the background into
-`<database dir>/workspaces/<project id>`, a directory Siamang owns. Write access is checked first.
-Each Lead turn, task start, and publication fetches first, so new commits on the repository are picked up without a manual pull.
+`POST /v0/projects` (`submit` permission and an unrestricted `*` scope; body `name`, optional `repository` as
+`owner/name` or a github.com URL) registers a project and sets it up in the background in
+`<database dir>/workspaces/<project id>`, a directory Siamang owns. The project's `repository` object says which kind
+it is in `kind`.
+
+* **`github`** (a repository is given): the repository is cloned. Write access is checked first. Each Lead turn, task
+  start, and publication fetches first, so new commits on the repository are picked up without a manual pull.
+  Approved work reaches a `siamang/*` branch and a pull request, and CI is followed there.
+* **`local`** (no repository, or a blank one): a new, empty project. Siamang runs `git init` with one README commit on
+  `main`, and there is no remote: nothing calls `gh` or a network, and there is no CI. Each task still works on its own
+  `siamang/*` branch. Approving the result merges it into `main` with `--no-ff` (`publication` becomes `published`,
+  `pr_number` and `pr_url` stay `null`), and the folder is left on `main`. A merge that conflicts is aborted and
+  reported as `merge_conflict`, never forced. A revision starts fresh from `main`, which already has the earlier work.
+  The folder is the only copy, so nothing throws work away: uncommitted changes found there when a task starts or
+  merges are kept with `git stash`, and ignored files such as `.env` are left alone. Execution evidence comes from the
+  sandbox when it is enabled; without it, the result has none, as for any run. To publish later, add a remote in that
+  folder and push `main`.
 
 The Lead then reads a bounded view of the repository and asks what the work needs. The spec moves
 through `thinking`, `gathering`, `pending_approval`, `approved`, or `failed`. `POST .../intake/messages`

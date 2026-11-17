@@ -20,8 +20,8 @@ const chipStatus = step =>
     /></span>
     <h2 class="page-title mt" style="font-size: 17px">Belum ada proyek</h2>
     <p class="muted">
-      Tautkan repo GitHub pertama Anda. Amang membaca isinya, menanyakan kebutuhan Anda, lalu tim bekerja
-      lewat branch dan PR.
+      Mulai proyek baru dari nol tanpa GitHub, atau tautkan repo GitHub yang sudah ada. Amang menanyakan
+      kebutuhan Anda dulu, lalu tim bekerja.
     </p>
     <AppButton @click="office.projectDialog = true"><Plus :size="16" /> Proyek baru</AppButton>
   </section>
