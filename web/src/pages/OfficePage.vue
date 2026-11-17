@@ -109,7 +109,7 @@ const stats = computed(() => [
             style="flex: 1"
             @click="office.showDocuments(office.focusAgent)"
           >
-            Dokumen {{ agentLabel }} <ArrowUpRight :size="14" />
+            Artifacts {{ agentLabel }} <ArrowUpRight :size="14" />
           </AppButton>
           <AppButton
             v-if="!office.demo && office.stage.task?.status === 'queued'"

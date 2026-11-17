@@ -98,7 +98,7 @@ Status per 4 November 2026, berdasarkan pembacaan kode dan dokumentasi.
 | Amang (Lead/Orchestrator) | Sebagian | Bertanya, menyusun brief, dan melapor; bila dinyalakan, menjawab dengan kutipan dari keputusan pemilik dan mengembalikan pekerjaan yang ditahan ([AUTONOMY.md](AUTONOMY.md)) | Diuji dengan model nyata; alur tahap masih ditentukan kode | 30 |
 | Planner | Sudah | PRD, roadmap, WBS, dan rencana | Perencanaan ulang saat berjalan | 28 |
 | Architect | Sudah | SRS, arsitektur, diagram, `work_packages` per gelombang dengan kontrak bersama; dokumen ditulis per bagian secara paralel | Graf dependensi antar-paket; dokumen satu tahap belum saling membaca | 28, 32 |
-| Designer (UI/UX) | Sebagian | Alur pengguna, sitemap, token, spesifikasi layar, dan aksesibilitas sebelum kode ([DESIGNER.md](DESIGNER.md)) | Wireframe HTML, edit token, restart paket yang terdampak saja | — |
+| Designer (UI/UX) | Sebagian | Alur pengguna, sitemap, token, wireframe HTML, spesifikasi layar, dan aksesibilitas sebelum kode; semuanya bisa diedit pemilik ([DESIGNER.md](DESIGNER.md)) | Restart paket yang terdampak saja, input per layar, cek kontras | — |
 | Programmer | Sudah | Patch, paralel per paket dalam satu gelombang; paket yang timeout dicoba lagi lalu dibelah dua; bisa memakai tool di sandbox bila dinyalakan | Pembelahan menurut isi kode, bukan hanya path | 27 |
 | QA | Sebagian | Pemeriksaan statis, rencana test | Menjalankan test | 26 |
 | Reviewer | Sudah | Pemeriksaan deterministik dan independen; ulasan model bersifat saran | Temuan model masuk loop revisi | 26 |
@@ -115,10 +115,8 @@ Status per 4 November 2026, berdasarkan pembacaan kode dan dokumentasi.
 
 Arah yang disepakati pemilik (17 November 2026):
 
-1. **Wireframe HTML statis.** Dokumen `wireframes` berisi satu blok `html` per layar, dirender di iframe
-   `sandbox` tanpa script, dengan warna dan font dari `design_tokens` sebagai variabel CSS. Owner bisa
-   mengedit kode wireframe dan token dengan pratinjau langsung, seperti diagram hari ini.
-2. **Edit blok, bukan hanya diagram.** Editor dan riwayat revisi mengenali blok `mermaid`, `html`, dan `json`.
+1. **Wireframe HTML statis** (sudah, [DESIGNER.md](DESIGNER.md)).
+2. **Edit blok, bukan hanya diagram** (sudah).
 3. **Restart selektif.** Perubahan desain yang dikirim mengulang hanya paket kerja yang path-nya beririsan
    dengan layar yang berubah (dari tabel `Layar | Route | File` di `ui_spec`) beserta gelombang sesudahnya.
    Ditentukan oleh kode, bukan model. Paket lain menyimpan patch-nya.

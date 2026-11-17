@@ -125,6 +125,21 @@ continues to approval. The approved design reaches the Programmer clipped to its
 budget, most binding documents first. Model-written review documents are advisory: they do
 not yet feed the revision loop or block approval.
 
+### Owner edits to the design
+
+Each catalog entry lists in `blocks` the fenced languages the owner may edit: `mermaid` everywhere, plus `html`
+in `wireframes` and `json` in `design_tokens`. Blocks are numbered over those languages only, so an example in
+another language, such as a JSON response in `api_spec`, is never a block.
+
+| Route | Permission | Meaning |
+|---|---|---|
+| `POST /v0/tasks/{id}/documents/{kind}/diagrams/{index}` | `approve` | Body `{"source", "base_sha256"}`. Replaces one block and keeps the earlier text in the append-only `api_document_revisions`. 409 `document_changed` when the document moved on, 422 `diagram_invalid` (empty, over 20,000 characters, a line starting with three backticks, or JSON that is not an object), 404 `diagram_not_found` |
+| `GET /v0/tasks/{id}/document-edits` | `read` | What changed, per block, and the edit `mode`: `gate`, `stopped`, or `revision` |
+| `POST /v0/tasks/{id}/design-edits/send` | `approve` | A stopped run goes again on the changed design; on a published task the proposals become a revision task (`submit` too) |
+
+At the gate, approving sends the edits. Edited blocks reach the Programmer first, marked `owner_edited`, and take
+precedence over the rest of the design.
+
 ## GitHub projects
 
 `POST /v0/projects` (`submit` permission and an unrestricted `*` scope; body `name`, `repository` as

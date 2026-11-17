@@ -12,7 +12,8 @@ Browser → gateway lokal (`scripts/local.mjs`, session + CSRF, token acak di se
 | Domain | `src/domain/status.js` | label status task yang jujur (heartbeat ≤15 dtk) |
 | Domain | `src/domain/team.js` | roster 7 agen, peta fase→agen, `teamState()` dan `transitions()` dari execution-events |
 | Domain | `src/domain/demo.js` | timeline simulasi berlabel `simulated:true` |
-| Domain | `src/domain/documents.js` | gabungan katalog dokumen backend dengan yang tercatat; entri tanpa catatan tampil "belum sampai tahap ini" |
+| Domain | `src/domain/documents.js` | gabungan katalog dokumen backend dengan yang tercatat; entri tanpa catatan tampil "belum sampai tahap ini". Juga daftar isi dokumen (`outlineOf`, bernomor sama dengan id anchor di `MarkdownText`) dan pencarian judul/isi (`searchHit`) |
+| Domain | `src/domain/design.js` | token desain menjadi variabel CSS yang disaring, halaman wireframe dengan CSP tanpa jaringan |
 | 3D | `src/three/office.js` | renderer, kamera, cahaya, loop, overlay label/balon, picking, follow, lifecycle/dispose |
 | 3D | `src/three/environment.js` | lantai, dinding berjendela, workstation, kiosk approval, papan pipeline, pantry, server rack |
 | 3D | `src/three/character.js` | karakter prosedural bersendi; aksi `sit/stand/walk` + gestur (`type`, `talk`, `listen`, `present`, `think`, `celebrate`, …) dengan blending teredam |

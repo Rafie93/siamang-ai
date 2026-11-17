@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, ref, useId, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useTheme } from '@/composables/useTheme'
 
 const props = defineProps({
@@ -51,19 +51,39 @@ const draw = async () => {
   }
 }
 
+// A document can hold twenty diagrams: each is drawn only as it comes near the screen. An editor draws at once.
+const root = ref()
+const near = ref(props.live || typeof IntersectionObserver !== 'function')
+let observer
+onMounted(() => {
+  if (near.value) return
+  observer = new IntersectionObserver(
+    entries => {
+      if (!entries.some(e => e.isIntersecting)) return
+      near.value = true
+      observer.disconnect()
+    },
+    { rootMargin: '600px 0px' },
+  )
+  observer.observe(root.value)
+})
+
 // Polling replaces the documents with equal text, which must not redraw the diagram.
-watch([() => props.source, dark], draw, { immediate: true })
+watch([() => props.source, dark, near], () => near.value && draw(), { immediate: true })
 onBeforeUnmount(() => {
   latest++
+  observer?.disconnect()
 })
 </script>
 
 <template>
-  <div v-if="svg" class="mermaid-diagram" v-html="svg" />
-  <p v-else-if="failed && live" class="muted">Belum ada gambar: perbaiki kodenya dulu.</p>
-  <div v-else-if="failed">
-    <p class="muted small">Diagram ini tidak bisa digambar. Berikut sumbernya:</p>
-    <pre class="code-block">{{ source }}</pre>
+  <div ref="root" class="mermaid-frame">
+    <div v-if="svg" class="mermaid-diagram" v-html="svg" />
+    <p v-else-if="failed && live" class="muted">Belum ada gambar: perbaiki kodenya dulu.</p>
+    <div v-else-if="failed">
+      <p class="muted small">Diagram ini tidak bisa digambar. Berikut sumbernya:</p>
+      <pre class="code-block">{{ source }}</pre>
+    </div>
+    <p v-else class="muted">Menggambar diagram…</p>
   </div>
-  <p v-else class="muted">Menggambar diagram…</p>
 </template>

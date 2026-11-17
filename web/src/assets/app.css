@@ -798,6 +798,7 @@ details[open] > .collapse-head .collapse-chevron {
 }
 
 .nav-item {
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -877,6 +878,55 @@ details[open] > .collapse-head .collapse-chevron {
   margin-inline-start: -8px;
 }
 
+.topbar-collapse {
+  margin-inline-start: -8px;
+}
+
+/* Collapsed to its icons: wide screens only, since a phone opens the sidebar as a drawer. */
+@media (min-width: 1001px) {
+  .sidebar,
+  .main {
+    transition:
+      width 0.16s,
+      margin 0.16s;
+  }
+
+  .sidebar.collapsed {
+    width: 64px;
+    padding-inline: 10px;
+  }
+
+  .sidebar.collapsed .brand {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .sidebar.collapsed .brand span,
+  .sidebar.collapsed .nav-label,
+  .sidebar.collapsed .local-note {
+    display: none;
+  }
+
+  .sidebar.collapsed .nav-item {
+    position: relative;
+    justify-content: center;
+    padding: 9px 0;
+  }
+
+  .sidebar.collapsed .nav-badge {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    min-width: 16px;
+    font-size: 10px;
+    line-height: 16px;
+  }
+
+  .main.nav-collapsed {
+    margin-inline-start: 64px;
+  }
+}
+
 .topbar-crumb {
   min-width: 0;
   color: var(--color-text-3);
@@ -916,6 +966,22 @@ details[open] > .collapse-head .collapse-chevron {
   min-width: 200px;
 }
 
+.page-filters {
+  align-items: flex-end;
+}
+
+.page-filters-fields {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 0;
+}
+
+.task-select {
+  flex-basis: 420px;
+}
+
 @media (max-width: 1000px) {
   .sidebar {
     visibility: hidden;
@@ -943,6 +1009,10 @@ details[open] > .collapse-head .collapse-chevron {
     display: inline-flex;
   }
 
+  .topbar-collapse {
+    display: none;
+  }
+
   .content {
     padding: 16px;
   }
@@ -952,6 +1022,15 @@ details[open] > .collapse-head .collapse-chevron {
   .topbar-crumb,
   .topbar-updates {
     display: none;
+  }
+
+  .page-filters {
+    flex-wrap: wrap;
+  }
+
+  .page-filters-fields,
+  .page-filters-fields .project-select {
+    flex-basis: 100%;
   }
 }
 
@@ -1393,6 +1472,103 @@ details[open] > .collapse-head .collapse-chevron {
   }
 }
 
+/* A wireframe is drawn at a real screen width inside a sandboxed frame, scaled down to the room it has. */
+.wireframe {
+  margin: 12px 0;
+}
+
+.wireframe-devices {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.wireframe-device {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wireframe-device[aria-pressed='true'] {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.wireframe-stage {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+/* A frame narrower than the stage, such as the phone width, sits in the middle. */
+.wireframe-frame {
+  display: block;
+  margin-inline: auto;
+  border: 0;
+  background: #ffffff; /* the wireframe's own page, whatever the app's theme */
+  transform-origin: 0 0;
+}
+
+.tokens .token-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.token-swatch {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.token-chip {
+  grid-row: span 2;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.token-name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.token-swatch code {
+  color: var(--color-text-2);
+  font-size: 12px;
+}
+
+.token-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.token-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .document-heading {
   display: flex;
   flex: 1;
@@ -1529,4 +1705,424 @@ details[open] > .collapse-head .collapse-chevron {
 .board-tasks button.board-task small {
   color: var(--color-text-2);
   font-size: 12px;
+}
+
+/* Documents: a list to find things in, and a reader. Rows are one line each, because a run writes many. */
+.doc-browser {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  height: calc(100dvh - 250px);
+  min-height: 480px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+}
+
+.doc-nav {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-inline-end: 1px solid var(--color-border);
+}
+
+.doc-nav-tools {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.doc-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  color: var(--color-text-3);
+}
+
+.doc-search:focus-within {
+  border-color: var(--color-primary);
+}
+
+.doc-search input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.doc-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.doc-filter {
+  padding: 2px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.doc-filter span {
+  color: var(--color-text-3);
+}
+
+.doc-filter[aria-pressed='true'] {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.doc-groups {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 0 12px;
+  overflow-y: auto;
+}
+
+.doc-empty {
+  padding: 12px;
+}
+
+.doc-group-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 12px 3px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: start;
+  cursor: pointer;
+}
+
+.doc-group-chevron {
+  flex: none;
+  transition: transform 0.12s;
+}
+
+.doc-group-head[aria-expanded='true'] .doc-group-chevron {
+  transform: rotate(90deg);
+}
+
+.doc-group-name {
+  flex: 1;
+  text-transform: uppercase;
+}
+
+.doc-group-count {
+  color: var(--color-text-3);
+  font-weight: 500;
+}
+
+.doc-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.doc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 12px 4px 26px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: start;
+  cursor: pointer;
+}
+
+.doc-row:hover {
+  background: var(--color-hover);
+}
+
+.doc-row.quiet {
+  color: var(--color-text-3);
+}
+
+.doc-row[aria-current='true'] {
+  background: var(--color-primary-soft);
+  box-shadow: inset 2px 0 0 var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.doc-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--color-text-3);
+  border-radius: 50%;
+}
+
+.doc-dot[data-status='generated'] {
+  border-color: var(--color-success);
+  background: var(--color-success);
+}
+
+.doc-dot[data-status='failed'] {
+  border-color: var(--color-error);
+  background: var(--color-error);
+}
+
+.doc-dot[data-status='not_applicable'],
+.doc-dot[data-status='not_assigned'],
+.doc-dot[data-status='not_run'] {
+  background: var(--color-text-3);
+  opacity: 0.5;
+}
+
+.doc-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-row-count {
+  flex: none;
+  color: var(--color-text-3);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.doc-snippet {
+  display: -webkit-box;
+  margin: 0 12px 4px 41px;
+  overflow: hidden;
+  color: var(--color-text-3);
+  font-size: 11.5px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.doc-reader {
+  min-width: 0;
+  padding: 16px 22px 28px;
+  overflow-y: auto;
+}
+
+.doc-back {
+  display: none;
+}
+
+.doc-reader-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.doc-reader-heading {
+  min-width: 0;
+}
+
+.doc-reader-meta {
+  margin: 0 0 2px;
+  color: var(--color-text-3);
+  font-size: 12px;
+}
+
+.doc-reader-title {
+  margin: 0;
+  font-size: 17px;
+}
+
+.doc-reader-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.doc-reason {
+  color: var(--color-text-2);
+}
+
+.doc-reader-body.with-outline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 24px;
+  align-items: start;
+}
+
+.doc-content {
+  min-width: 0;
+}
+
+.md-block,
+.doc-content h4,
+.doc-content h5,
+.doc-content h6 {
+  scroll-margin-top: 12px;
+}
+
+.doc-outline {
+  position: sticky;
+  top: 0;
+  order: 2;
+  max-height: calc(100dvh - 300px);
+  padding-inline-start: 12px;
+  overflow-y: auto;
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.doc-outline-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.doc-outline-head span {
+  color: var(--color-text-3);
+  font-weight: 400;
+}
+
+.doc-outline-search {
+  width: 100%;
+  height: 28px;
+  margin-bottom: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.doc-outline-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.doc-outline-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 6px 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-2);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-align: start;
+  cursor: pointer;
+}
+
+.doc-outline-item:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.doc-outline-item.block {
+  color: var(--color-text);
+}
+
+.doc-outline-item.hit {
+  background: var(--color-warning-soft);
+}
+
+.doc-outline-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-outline-item small {
+  flex: none;
+  color: var(--color-text-3);
+  font-size: 10.5px;
+}
+
+@media (max-width: 1280px) {
+  .doc-reader-body.with-outline {
+    display: block;
+  }
+
+  .doc-outline {
+    position: static;
+    max-height: 220px;
+    margin-bottom: 14px;
+    padding: 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+  }
+}
+
+/* On a phone the list and the reader take turns, and the page scrolls as usual. */
+@media (max-width: 900px) {
+  .doc-browser {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    min-height: 0;
+  }
+
+  .doc-nav {
+    border-inline-end: 0;
+  }
+
+  .doc-browser.reading .doc-nav,
+  .doc-browser:not(.reading) .doc-reader {
+    display: none;
+  }
+
+  .doc-reader {
+    padding: 12px 14px 20px;
+    overflow: visible;
+  }
+
+  .doc-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-primary);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
 }

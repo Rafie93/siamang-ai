@@ -8,7 +8,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 
@@ -33,6 +33,7 @@ class Spec:
     kind: str
     title: str
     source: Source = Source.AUTHORED
+    blocks: tuple[str, ...] = ('mermaid',)  # fenced languages the owner may edit, see documents.diagrams
 
 
 def _specs(agent, stage, source, *entries):
@@ -54,10 +55,12 @@ CATALOG: tuple[Spec, ...] = (
             ('erd', 'ERD / Database Schema'), ('sequence_diagram', 'Sequence Diagram'),
             ('api_spec', 'API Specification'), ('technical_design', 'Technical Design Document')),
     *_specs('analyst', 'analysis', Source.DERIVED, ('work_packages', 'Paket Kerja Programmer')),
+    # One model call writes the tokens, the wireframes that use them, and the screens they draw: parts of a stage
+    # run side by side and cannot read each other.
     *_specs('designer', 'designing', Source.AUTHORED,
-            ('user_flow', 'User Flow / Journey'), ('sitemap', 'Sitemap dan Navigasi'),
-            ('design_tokens', 'Design System / Tokens'), ('ui_spec', 'Spesifikasi Layar dan Komponen'),
-            ('accessibility', 'Aksesibilitas')),
+            ('design_tokens', 'Design System / Tokens'), ('wireframes', 'Wireframe per Layar'),
+            ('ui_spec', 'Spesifikasi Layar dan Komponen'), ('user_flow', 'User Flow / Journey'),
+            ('sitemap', 'Sitemap dan Navigasi'), ('accessibility', 'Aksesibilitas')),
     *_specs('programmer', 'programming', Source.DERIVED,
             ('source_code', 'Source Code'), ('file_structure', 'File dan Folder Project'),
             ('migration', 'Database Migration'), ('unit_tests', 'Unit Test Awal'), ('patch', 'Code Patch / Diff')),
@@ -79,6 +82,8 @@ CATALOG: tuple[Spec, ...] = (
             ('status_report', 'Status dan Progres Proyek'), ('final_report', 'Final Project Report'),
             ('recommendations', 'Rekomendasi Tindak Lanjut')),
 )
+EDITABLE_BLOCKS = {'wireframes': ('mermaid', 'html'), 'design_tokens': ('mermaid', 'json')}
+CATALOG = tuple(replace(s, blocks=EDITABLE_BLOCKS[s.kind]) if s.kind in EDITABLE_BLOCKS else s for s in CATALOG)
 AGENTS = ('lead', 'planner', 'analyst', 'designer', 'programmer', 'qa', 'reviewer')
 SPECS = {spec.kind: spec for spec in CATALOG}
 

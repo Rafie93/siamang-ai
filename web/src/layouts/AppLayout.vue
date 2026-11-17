@@ -1,5 +1,14 @@
 <script setup>
-import { LaptopMinimal, Menu, Monitor, Moon, RefreshCw, Sun } from '@lucide/vue'
+import {
+  LaptopMinimal,
+  Menu,
+  Monitor,
+  Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  RefreshCw,
+  Sun,
+} from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -14,6 +23,24 @@ const route = useRoute()
 const { mode, cycle } = useTheme()
 
 const navOpen = ref(false)
+// On a wide screen the sidebar can shrink to its icons. Remembered per browser; a phone always uses the drawer.
+const NAV_KEY = 'siamang.nav.collapsed'
+const readCollapsed = () => {
+  try {
+    return localStorage.getItem(NAV_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+const collapsed = ref(readCollapsed())
+const toggleCollapsed = () => {
+  collapsed.value = !collapsed.value
+  try {
+    localStorage.setItem(NAV_KEY, collapsed.value ? '1' : '0')
+  } catch {
+    // Storage may be blocked; the sidebar still toggles for this visit.
+  }
+}
 const navPages = pages.filter(p => p.icon)
 const themeIcon = computed(() => ({ light: Sun, dark: Moon, system: Monitor })[mode.value])
 const themeLabel = computed(
@@ -40,7 +67,7 @@ watch(
 </script>
 
 <template>
-  <aside class="sidebar" :class="{ open: navOpen }">
+  <aside class="sidebar" :class="{ open: navOpen, collapsed }">
     <RouterLink class="brand" :to="{ name: 'office' }">
       <img src="/logo.png" alt="" width="34" height="34" />
       <span><strong>Siamang</strong><small>Tim engineering AI</small></span>
@@ -53,9 +80,10 @@ watch(
         class="nav-item"
         :class="{ 'nav-parent-active': route.meta.parent === p.name }"
         :to="{ name: p.name }"
+        :title="collapsed ? p.title : undefined"
       >
         <component :is="p.icon" :size="17" aria-hidden="true" />
-        {{ p.title }}
+        <span class="nav-label">{{ p.title }}</span>
         <span v-if="p.name === 'approvals' && office.approvals.length" class="nav-badge">
           {{ office.approvals.length }}
         </span>
@@ -69,10 +97,20 @@ watch(
   </aside>
   <div v-if="navOpen" class="scrim" @click="navOpen = false" />
 
-  <div class="main">
+  <div class="main" :class="{ 'nav-collapsed': collapsed }">
     <header class="topbar">
       <button type="button" class="icon-btn topbar-menu" aria-label="Buka menu" @click="navOpen = true">
         <Menu :size="20" aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        class="icon-btn topbar-collapse"
+        :aria-label="collapsed ? 'Lebarkan sidebar' : 'Ciutkan sidebar'"
+        :title="collapsed ? 'Lebarkan sidebar' : 'Ciutkan sidebar'"
+        :aria-expanded="!collapsed"
+        @click="toggleCollapsed"
+      >
+        <component :is="collapsed ? PanelLeftOpen : PanelLeftClose" :size="18" aria-hidden="true" />
       </button>
       <span class="topbar-crumb truncate"
         >Workspace / <b>{{ route.meta.title }}</b></span

@@ -12,13 +12,13 @@ const office = useOfficeStore()
     v-if="office.editMode !== 'gate' && office.designEdits?.pending"
     role="status"
     tone="warning"
-    :title="`${office.designEdits.items.length} diagram berubah dan belum dikirim`"
+    :title="`${office.designEdits.items.length} bagian desain berubah dan belum dikirim`"
   >
     <p>
       {{
         office.editMode === 'revision'
           ? 'Task ini sudah terbit, jadi perubahan ini menjadi task revisi. Kode lama tidak tertimpa.'
-          : 'Programmer belum melihat perubahan ini. Edit diagram lain dulu bila perlu, lalu kirim sekali.'
+          : 'Programmer belum melihat perubahan ini. Edit bagian lain dulu bila perlu, lalu kirim sekali.'
       }}
     </p>
     <AppButton :disabled="!office.can('approve')" @click="office.ask('design-send', office.selectedId)">

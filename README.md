@@ -158,7 +158,7 @@ The interface text is currently in Indonesian, so the button names below are sho
 2. Open **Projects**, choose **Proyek baru** (new project), paste a GitHub URL such as `https://github.com/OWNER/REPO`, and choose **Buat proyek** (create project).
 3. Amang reads the repository and asks questions. Answer them on the project page, then choose **Setujui spesifikasi** (approve the specification).
 4. Open **Command**, write what you want, and choose **Kirim ke Amang** (send to Amang). Check the summary, then choose **Setuju, buat task dan mulai** (agree, create the task and start).
-5. Follow the work in **Office** or **Tasks**. When the design is ready, read it in **Documents** and choose **Setujui desain** (approve the design) on the task.
+5. Follow the work in **Office** or **Tasks**. When the design is ready, read it in **Artifacts** and choose **Setujui desain** (approve the design) on the task.
 6. When the result is ready, read the evidence in **Reports**, then choose **Approve** in **Approvals**. Siamang creates a commit on a `siamang/*` branch and opens a pull request. Merging stays with you.
 
 To look around without a model or a repository, choose **▶ Mode demo** on the **Office** page. To change which model each agent uses, open **Settings**.
@@ -170,7 +170,7 @@ To look around without a model or a repository, choose **▶ Mode demo** on the 
 | **3D office** | Seven agents, each with a desk and an animated monitor. Orbit, zoom, follow the activity, or click an agent to see its work. |
 | **Handoffs** | Each recorded phase change plays as a handoff between agents. An agent is shown working only when the backend reports fresh activity, never when offline or stale. |
 | **Two-way command** | Amang checks your instruction before a task exists, and a stopped task explains why and can continue with your answer. |
-| **Documents** | Each agent's output with its origin: written by a model, computed by the system, or measured. |
+| **Artifacts** | Each agent's output (documents, diagrams, wireframes) with its origin: written by a model, computed by the system, or measured. Search, filters, and a table of contents for long documents. |
 | **Evidence and approvals** | Checks with exit codes, recovery attempts and technical debt when the sandbox is on. Without it, the page says the code was not run. |
 | **Demo mode** | A simulated run for presentations, always labelled and kept out of Tasks, Reports and Approvals. |
 | **Accessibility** | A text team list and log, reduced motion, native keyboard-friendly controls, and a 2D fallback without WebGL. |

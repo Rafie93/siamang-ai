@@ -156,7 +156,7 @@ Satu perintah ini sekaligus menjalankan backend, jadi server API tidak perlu dij
 2. Buka **Projects**, pilih **Proyek baru**, tempel URL GitHub seperti `https://github.com/OWNER/REPO`, lalu pilih **Buat proyek**.
 3. Amang membaca repo dan bertanya. Jawab di halaman proyek, lalu pilih **Setujui spesifikasi**.
 4. Buka **Command**, tulis yang Anda inginkan, lalu pilih **Kirim ke Amang**. Periksa ringkasannya, lalu pilih **Setuju, buat task dan mulai**.
-5. Ikuti pekerjaannya di **Office** atau **Tasks**. Saat desain siap, baca di **Documents**, lalu pilih **Setujui desain** pada task.
+5. Ikuti pekerjaannya di **Office** atau **Tasks**. Saat desain siap, baca di **Artifacts**, lalu pilih **Setujui desain** pada task.
 6. Saat hasil siap, baca buktinya di **Reports**, lalu pilih **Approve** di **Approvals**. Siamang membuat commit di branch `siamang/*` dan membuka pull request. Merge tetap di tangan Anda.
 
 Untuk melihat-lihat tanpa model atau repo, pilih **▶ Mode demo** di halaman **Office**. Untuk mengganti model tiap agen, buka **Settings**.
@@ -168,7 +168,7 @@ Untuk melihat-lihat tanpa model atau repo, pilih **▶ Mode demo** di halaman **
 | **Kantor 3D** | Tujuh agen, masing-masing dengan meja dan monitor animasi. Orbit, zoom, ikuti aktivitas, atau klik agen untuk melihat kerjanya. |
 | **Serah-terima** | Setiap perubahan fase yang tercatat dimainkan sebagai serah-terima antar-agen. Agen hanya tampil bekerja bila backend melaporkan aktivitas segar, tidak pernah saat offline atau stale. |
 | **Command dua arah** | Amang memastikan instruksi Anda sebelum task dibuat, dan task yang berhenti menjelaskan alasannya serta bisa dilanjutkan dengan jawaban Anda. |
-| **Dokumen** | Hasil kerja tiap agen beserta asalnya: tulisan model, dihitung sistem, atau hasil ukur. |
+| **Artifacts** | Hasil kerja tiap agen (dokumen, diagram, wireframe) beserta asalnya: tulisan model, dihitung sistem, atau hasil ukur. Ada pencarian, filter, dan daftar isi untuk dokumen panjang. |
 | **Bukti dan approval** | Pemeriksaan dengan exit code, percobaan recovery, dan utang teknis saat sandbox menyala. Tanpa sandbox, halaman ini menyatakan kode belum dijalankan. |
 | **Mode demo** | Simulasi untuk presentasi, selalu berlabel dan tidak masuk ke Tasks, Reports, dan Approvals. |
 | **Aksesibilitas** | Daftar tim dan log berbasis teks, reduced motion, kontrol native yang ramah keyboard, dan fallback 2D tanpa WebGL. |

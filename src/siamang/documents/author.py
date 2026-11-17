@@ -29,7 +29,7 @@ TRACKED_LIMIT = 400  # file names of the repository a design call is shown
 DESIGN_BUDGET_BYTES = 4_500  # the Loop refuses input above 8 KiB; the project spec takes the rest
 SPEC_BUDGET_BYTES = 2_000
 DESIGN_PRIORITY = ('acceptance_criteria', 'task_specification', 'technical_design', 'ui_spec', 'prd', 'api_spec',
-                   'design_tokens', 'erd', 'class_diagram', 'sequence_diagram', 'user_flow', 'use_case_diagram', 'srs')
+                   'design_tokens', 'erd', 'class_diagram', 'sequence_diagram', 'wireframes', 'user_flow', 'use_case_diagram', 'srs')
 OWNER_PRECEDENCE = 'Entries with owner_edited are diagrams the project owner changed by hand: where anything else disagrees, follow them.'
 
 SKILLS: Mapping[str, str] = {
@@ -44,7 +44,12 @@ SKILLS: Mapping[str, str] = {
                 'flowchart of the main journeys, including empty, error, and cancel paths. sitemap is a Mermaid graph '
                 'of the screens with their routes. design_tokens is one json code fence of the form '
                 '{"colors": {"name": "#rrggbb"}, "typography": {}, "spacing": {}, "radius": {}}, where colors include '
-                'text and background. ui_spec describes each screen: purpose, components, the empty, loading, error, '
+                'text and background and every value is a CSS value. wireframes has, for each screen, a heading '
+                '"### <screen>" with the name used in ui_spec, then one html code fence: static HTML with one inline '
+                'style element, no script, no external URL, images as plain boxes, readable on a phone and a desktop. '
+                'The page that shows a wireframe defines CSS variables from design_tokens: --color-<name>, '
+                '--font-<name>, --space-<name>, and --radius-<name>, nested keys joined with a hyphen; use them, '
+                'as in var(--color-primary), instead of literal values. ui_spec describes each screen: purpose, components, the empty, loading, error, '
                 'and success states, and behaviour on a phone and a desktop; it starts with a Markdown table with '
                 'the columns Layar, Route, and File naming the file of the repository that holds each screen, new or '
                 'existing. accessibility covers contrast, keyboard use, focus, and labels. When the work has no user '
@@ -254,8 +259,8 @@ def design_input(documents: tuple[Document, ...], budget: int = DESIGN_BUDGET_BY
     and the most binding documents still fit. The prose around an edited diagram was written for the old diagram: it stays out.
     """
     ready = {d.spec.kind: d.content for d in documents if d.status is DocumentStatus.GENERATED}
-    edited = {d.spec.kind: '\n\n'.join(diagrams_of(d.content)) for d in documents
-              if d.edited_by and d.status is DocumentStatus.GENERATED and diagrams_of(d.content)}
+    edited = {d.spec.kind: '\n\n'.join(diagrams_of(d.content, d.spec.blocks)) for d in documents
+              if d.edited_by and d.status is DocumentStatus.GENERATED and diagrams_of(d.content, d.spec.blocks)}
     design, omitted = [], []
 
     def rank(kind):

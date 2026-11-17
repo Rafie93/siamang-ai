@@ -84,7 +84,7 @@ export const useOfficeStore = defineStore('office', () => {
   const portfolio = ref([]),
     documents = ref([]),
     documentAgent = ref('lead'),
-    documentKinds = ref([]),
+    documentKind = ref(''),
     featureId = ref(''),
     featureTitle = ref(''),
     repositoryDraft = ref({})
@@ -292,7 +292,7 @@ export const useOfficeStore = defineStore('office', () => {
   const editMode = computed(() => designEdits.value?.mode ?? (designPending.value ? 'gate' : null))
   function showDocuments(officeId) {
     documentAgent.value = documentAgentFor(officeId) || 'lead'
-    documentKinds.value = []
+    documentKind.value = ''
     go('documents')
   }
   async function createFeature() {
@@ -677,7 +677,7 @@ export const useOfficeStore = defineStore('office', () => {
     taskMessages.value = []
     featureId.value = ''
     documents.value = []
-    documentKinds.value = []
+    documentKind.value = ''
     selectedId.value = ''
     selected.value = null
     reports.value = []
@@ -695,7 +695,7 @@ export const useOfficeStore = defineStore('office', () => {
     reports.value = []
     events.value = []
     documents.value = []
-    documentKinds.value = []
+    documentKind.value = ''
     await refresh()
   }
   async function submit() {
@@ -819,7 +819,7 @@ export const useOfficeStore = defineStore('office', () => {
     reports.value = []
     events.value = []
     documents.value = []
-    documentKinds.value = []
+    documentKind.value = ''
   }
   function pickProject(id) {
     projectId.value = id
@@ -849,12 +849,12 @@ export const useOfficeStore = defineStore('office', () => {
     go('reports')
   }
   function openTaskDocuments() {
-    documentKinds.value = []
+    documentKind.value = ''
     go('documents')
   }
   function pickDocumentAgent(id) {
     documentAgent.value = id
-    documentKinds.value = []
+    documentKind.value = ''
   }
   function start() {
     disposed = false
@@ -944,7 +944,7 @@ export const useOfficeStore = defineStore('office', () => {
     portfolio,
     documents,
     documentAgent,
-    documentKinds,
+    documentKind,
     featureId,
     featureTitle,
     repositoryDraft,

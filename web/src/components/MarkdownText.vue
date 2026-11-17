@@ -1,7 +1,10 @@
 <script setup>
 import { h } from 'vue'
 import MermaidDiagram from '@/components/MermaidDiagram.vue'
+import TokenSwatches from '@/components/TokenSwatches.vue'
+import WireframeFrame from '@/components/WireframeFrame.vue'
 import AppButton from '@/components/ui/AppButton.vue'
+import { parseTokens } from '@/domain/design.js'
 import { parseInline, parseMarkdown } from '@/domain/labels.js'
 
 const props = defineProps({
@@ -9,6 +12,12 @@ const props = defineProps({
   editableDiagrams: { type: Boolean, default: false },
   // Diagrams changed but not yet part of this document, by number: shown in place of what it says.
   diagramOverrides: { type: Object, default: () => ({}) },
+  // The fenced languages this document draws and numbers as blocks, from the backend catalog (Spec.blocks).
+  blocks: { type: Array, default: () => ['mermaid'] },
+  // The design tokens as CSS variables, for the wireframes.
+  tokensCss: { type: String, default: '' },
+  // With a prefix, headings and blocks get ids `${anchor}-h<n>` and `${anchor}-b<n>`, as outlineOf numbers them.
+  anchor: { type: String, default: '' },
 })
 const emit = defineEmits(['edit-diagram'])
 
@@ -22,17 +31,30 @@ const inline = text =>
     return part.text
   })
 
-// Numbered as the backend numbers them: the nth Mermaid fence of the document, valid or not.
-const diagram = (written, index) => {
+const EDIT_LABEL = { mermaid: 'Edit diagram', html: 'Edit wireframe', json: 'Edit token' }
+const draw = (lang, source) => {
+  if (lang === 'mermaid') return h(MermaidDiagram, { source })
+  if (lang === 'html') return h(WireframeFrame, { html: source, css: props.tokensCss })
+  const tokens = parseTokens(source)
+  if (tokens) return h(TokenSwatches, { tokens })
+  return h('div', [
+    h('p', { class: 'muted' }, 'JSON token belum valid.'),
+    h('pre', { class: 'code-block' }, source),
+  ])
+}
+
+// Numbered as the backend numbers them: the nth fence of the document in one of its block languages, valid or not.
+const diagram = (lang, written, index) => {
   const source = props.diagramOverrides[index] ?? written
-  const drawn = h(MermaidDiagram, { source })
-  if (!props.editableDiagrams) return drawn
-  return h('div', { class: 'diagram-block' }, [
+  const drawn = draw(lang, source)
+  const id = props.anchor ? `${props.anchor}-b${index}` : undefined
+  if (!props.editableDiagrams) return id ? h('div', { id, class: 'md-block' }, [drawn]) : drawn
+  return h('div', { id, class: ['diagram-block', id && 'md-block'] }, [
     h('div', { class: 'diagram-block-actions' }, [
       h(
         AppButton,
-        { variant: 'secondary', size: 'sm', onClick: () => emit('edit-diagram', { index, source }) },
-        () => 'Edit diagram',
+        { variant: 'secondary', size: 'sm', onClick: () => emit('edit-diagram', { index, source, lang }) },
+        () => EDIT_LABEL[lang],
       ),
     ]),
     drawn,
@@ -41,12 +63,20 @@ const diagram = (written, index) => {
 
 const block = (b, diagrams) => {
   switch (b.type) {
-    case 'heading':
-      return h(`h${Math.min(b.level + 3, 6)}`, inline(b.text))
+    case 'heading': {
+      const n = diagrams.heading++
+      return h(
+        `h${Math.min(b.level + 3, 6)}`,
+        { id: props.anchor ? `${props.anchor}-h${n}` : undefined },
+        inline(b.text),
+      )
+    }
     case 'code':
-      return h('pre', { class: 'code-block' }, b.text)
+      return b.lang !== 'mermaid' && props.blocks.includes(b.lang)
+        ? diagram(b.lang, b.text, diagrams.next++)
+        : h('pre', { class: 'code-block' }, b.text)
     case 'mermaid':
-      return diagram(b.text, diagrams.next++)
+      return diagram('mermaid', b.text, diagrams.next++)
     case 'list':
       return h(
         b.ordered ? 'ol' : 'ul',
@@ -83,7 +113,7 @@ const block = (b, diagrams) => {
 }
 
 const Rendered = () => {
-  const diagrams = { next: 0 }
+  const diagrams = { next: 0, heading: 0 }
   return h(
     'div',
     { class: 'markdown' },

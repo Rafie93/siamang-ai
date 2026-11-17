@@ -18,6 +18,7 @@ api /approvals/RUN_ID -d '{"decision": "approve", "reason": "Bukti sudah saya pe
 | **Amang (Lead)** | Bertanya, menyusun brief, melapor | Ya |
 | **Planner** | PRD, roadmap, WBS, acceptance criteria | Ya |
 | **Arsitek** | SRS, arsitektur, diagram, pembagian paket kerja per gelombang | Ya |
+| **Desainer** | Token desain, wireframe HTML, spesifikasi layar, alur pengguna, sitemap, aksesibilitas | Ya |
 | **Programmer** | Menulis patch per paket, dengan beberapa paket sekaligus dalam satu gelombang | Ya |
 | **QA** | Pemeriksaan statis yang menentukan; model hanya menulis rencana test | Sebagian |
 | **Reviewer** | Pemeriksaan deterministik yang menentukan; ulasan model bersifat saran | Sebagian |

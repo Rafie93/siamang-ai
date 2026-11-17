@@ -19,7 +19,7 @@ const edits = computed(() => (asksAboutEdits.value ? office.designEdits?.items |
 const revision = computed(() => action.value === 'design-send' && office.editMode === 'revision')
 const heading = computed(() =>
   edits.value.length
-    ? `Ada ${edits.value.length} diagram berubah. ${revision.value ? 'Buat task revisi?' : 'Kirim ke Programmer?'}`
+    ? `Ada ${edits.value.length} bagian desain berubah. ${revision.value ? 'Buat task revisi?' : 'Kirim ke Programmer?'}`
     : `Konfirmasi ${action.value}`,
 )
 const loadingEdits = computed(() => asksAboutEdits.value && office.designEditsLoading)
@@ -72,7 +72,7 @@ const message = computed(() => {
       <ul class="design-edits">
         <li v-for="e in edits" :key="`${e.kind}-${e.diagram}`">
           <strong>{{ e.title }}</strong
-          >, diagram {{ e.diagram + 1 }}
+          >, bagian {{ e.diagram + 1 }}
           <span class="muted small">+{{ e.added }} / −{{ e.removed }} baris · {{ e.edited_by }}</span>
         </li>
       </ul>

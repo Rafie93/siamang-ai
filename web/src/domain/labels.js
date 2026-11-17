@@ -258,12 +258,19 @@ export function parseMarkdown(text) {
       continue
     }
     if (line.startsWith('```')) {
-      const type = /^```\s*mermaid\s*$/i.test(line) ? 'mermaid' : 'code',
+      const lang = (/^```\s*([A-Za-z]+)\s*$/.exec(line)?.[1] || '').toLowerCase(),
         body = []
       i++
       while (i < lines.length && !lines[i].startsWith('```')) body.push(lines[i++])
       i++
-      blocks.push({ type, text: body.join('\n') })
+      const text = body.join('\n')
+      blocks.push(
+        lang === 'mermaid'
+          ? { type: 'mermaid', text }
+          : lang
+            ? { type: 'code', lang, text }
+            : { type: 'code', text },
+      )
       continue
     }
     if (/^\s*[-*]\s/.test(line) || /^\s*\d+[.)]\s/.test(line)) {

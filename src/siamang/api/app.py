@@ -239,7 +239,7 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
                 'agent_models': runtime.assignments(),
                 'execution': runtime.execution_features(),
                 'autonomy': dict(level=runtime.autonomy().level, lead=runtime.autonomy().lead),
-                'documents': [dict(agent=s.agent, stage=s.stage, kind=s.kind, title=s.title, source=str(s.source))
+                'documents': [dict(agent=s.agent, stage=s.stage, kind=s.kind, title=s.title, source=str(s.source), blocks=list(s.blocks))
                               for s in CATALOG],
                 'task_statuses': [s.value for s in TaskStatus],
                 'execution_phases': ['queued', 'clarification', 'briefing', 'planning', 'analysis', 'designing', 'design_approval', 'programming',

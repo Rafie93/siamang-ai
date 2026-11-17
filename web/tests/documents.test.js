@@ -1,5 +1,15 @@
-import { it, expect } from 'vitest'
-import { groupDocuments, documentAgentFor, modelLabel } from '../src/domain/documents.js'
+import { describe, it, expect } from 'vitest'
+import {
+  blockSummary,
+  diagramTitle,
+  diagramType,
+  documentAgentFor,
+  documentType,
+  groupDocuments,
+  modelLabel,
+  outlineOf,
+  searchHit,
+} from '../src/domain/documents.js'
 import { teamState, agentForPhase } from '../src/domain/team.js'
 import { visualStatus } from '../src/domain/status.js'
 import { validResponse } from '../src/services/contract.js'
@@ -137,4 +147,64 @@ it('reads both answers to sending changed diagrams', () => {
     }),
   ).toBe(true)
   expect(validResponse(send, 'POST', { mode: 'revision' })).toBe(false)
+})
+
+describe('finding one picture among many', () => {
+  const SEQS = [
+    '# Sequence Diagram',
+    'Pengantar.',
+    '## Login',
+    '```mermaid\nsequenceDiagram\n  A->>B: masuk\n```',
+    '## Bayar',
+    'Alur bayar.',
+    '```mermaid\n---\ntitle: Bayar kartu\n---\nsequenceDiagram\n  A->>B: bayar\n```',
+    '```mermaid\n%% catatan\nflowchart TD\n  A --> B\n```',
+    '```json\n{"a": 1}\n```',
+  ].join('\n\n')
+  it('names each diagram by the heading above it, its own title, or its number, and lists nothing twice', () => {
+    const outline = outlineOf(SEQS)
+    expect(outline.map(e => [e.id, e.label, e.kind || ''])).toEqual([
+      ['h0', 'Sequence Diagram', ''],
+      ['b0', 'Login', 'Sequence'],
+      ['h2', 'Bayar', ''],
+      ['b1', 'Bayar kartu', 'Sequence'],
+      ['b2', 'Diagram 3', 'Flowchart'],
+    ])
+    expect(outline.find(e => e.id === 'b1').level).toBe(3) // under its heading
+  })
+  it('counts the blocks a document allows, as MarkdownText numbers them', () => {
+    expect(outlineOf(SEQS, ['mermaid', 'json']).at(-1)).toMatchObject({
+      id: 'b3',
+      lang: 'json',
+      label: 'Token 4',
+    })
+    expect(blockSummary(outlineOf(SEQS))).toBe('3 diagram')
+    expect(
+      blockSummary(outlineOf('```html\n<p/>\n```\n\n```mermaid\nflowchart TD\n```', ['mermaid', 'html'])),
+    ).toBe('1 layar')
+    expect(documentType(outlineOf('teks saja'))).toBe('text')
+    expect(documentType(outlineOf(SEQS))).toBe('diagram')
+    expect(documentType(outlineOf(SEQS, ['mermaid', 'json']))).toBe('wireframe')
+  })
+  it('knows the common diagram kinds and titles', () => {
+    expect(diagramType('erDiagram\n  A ||--o{ B : x')).toBe('ERD')
+    expect(diagramType('graph LR\n  A-->B')).toBe('Flowchart')
+    expect(diagramType('stateDiagram-v2\n  [*] --> A')).toBe('State')
+    expect(diagramType('bukan diagram')).toBe('Diagram')
+    expect(diagramTitle('flowchart TD\n  title Alur utama\n  A-->B')).toBe('Alur utama')
+    expect(diagramTitle('flowchart TD')).toBe('')
+  })
+  it('searches titles and text, and shows the words around a match', () => {
+    const doc = { kind: 'sequence_diagram', title: 'Sequence Diagram', content: SEQS }
+    expect(searchHit(doc, '')).toEqual({ match: true, snippet: '' })
+    expect(searchHit(doc, 'sequence')).toEqual({ match: true, snippet: '' })
+    const hit = searchHit(doc, 'BAYAR KARTU')
+    expect(hit.match).toBe(true)
+    expect(hit.snippet).toContain('Bayar kartu')
+    expect(hit.snippet.startsWith('…')).toBe(true)
+    expect(searchHit(doc, 'tidak ada').match).toBe(false)
+    expect(
+      searchHit({ title: 'X', content: '', reason: 'Tidak relevan untuk task ini.' }, 'relevan').match,
+    ).toBe(true)
+  })
 })

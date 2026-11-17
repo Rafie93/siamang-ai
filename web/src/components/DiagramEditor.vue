@@ -1,9 +1,12 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import MermaidDiagram from '@/components/MermaidDiagram.vue'
+import TokenSwatches from '@/components/TokenSwatches.vue'
+import WireframeFrame from '@/components/WireframeFrame.vue'
 import AppAlert from '@/components/ui/AppAlert.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppDialog from '@/components/ui/AppDialog.vue'
+import { blockProblem, parseTokens } from '@/domain/design.js'
 import { errorText } from '@/domain/labels.js'
 import { useOfficeStore } from '@/stores/office'
 
@@ -13,7 +16,27 @@ const props = defineProps({
   index: { type: Number, required: true },
   source: { type: String, required: true },
   base: { type: String, required: true },
+  lang: { type: String, default: 'mermaid' },
+  tokensCss: { type: String, default: '' },
 })
+const LANGS = {
+  mermaid: {
+    noun: 'diagram',
+    label: 'Kode Mermaid',
+    hint: 'Tulis kode Mermaid di kiri. Preview di kanan mengikuti saat Anda mengetik.',
+  },
+  html: {
+    noun: 'wireframe',
+    label: 'Kode HTML',
+    hint: 'HTML statis di kiri, tanpa script dan tanpa alamat luar. Preview di kanan memakai token desain.',
+  },
+  json: {
+    noun: 'token',
+    label: 'JSON token',
+    hint: 'Ubah token dalam JSON. Warna di kanan mengikuti saat Anda mengetik.',
+  },
+}
+const text = LANGS[props.lang] || LANGS.mermaid
 const emit = defineEmits(['close'])
 
 const office = useOfficeStore()
@@ -41,6 +64,12 @@ watch(code, value => {
   timer = setTimeout(() => (preview.value = value), PREVIEW_DELAY_MS)
 })
 onBeforeUnmount(() => clearTimeout(timer))
+// Mermaid reports its own result once drawn; HTML and JSON are judged here, by the rules the backend applies.
+if (props.lang !== 'mermaid')
+  watch(preview, value => (drawn.value = { source: value, error: blockProblem(props.lang, value) }), {
+    immediate: true,
+  })
+const previewTokens = computed(() => (props.lang === 'json' ? parseTokens(preview.value) : null))
 
 const close = () => {
   if (changed.value && !leaving.value) leaving.value = true
@@ -63,17 +92,17 @@ const save = async () => {
     class="diagram-editor"
     :width="1440"
     :persistent="office.busy"
-    :title="`Edit diagram: ${title}`"
+    :title="`Edit ${text.noun}: ${title}`"
     :subtitle="
       office.editMode === 'revision'
         ? 'Task ini sudah terbit, jadi perubahan disimpan sebagai usulan untuk task revisi. Dokumen aslinya tidak berubah.'
-        : 'Tulis kode Mermaid di kiri. Preview di kanan mengikuti saat Anda mengetik.'
+        : text.hint
     "
     @close="close"
   >
     <div class="diagram-editor-panes">
       <div class="diagram-editor-pane">
-        <label class="diagram-editor-label" for="diagram-editor-code">Kode Mermaid</label>
+        <label class="diagram-editor-label" for="diagram-editor-code">{{ text.label }}</label>
         <textarea
           id="diagram-editor-code"
           v-model="code"
@@ -87,7 +116,9 @@ const save = async () => {
       <div class="diagram-editor-pane">
         <span class="diagram-editor-label">Preview</span>
         <div class="diagram-editor-preview">
-          <MermaidDiagram :source="preview" live @result="drawn = $event" />
+          <MermaidDiagram v-if="lang === 'mermaid'" :source="preview" live @result="drawn = $event" />
+          <WireframeFrame v-else-if="lang === 'html'" :html="preview" :css="tokensCss" />
+          <TokenSwatches v-else-if="previewTokens" :tokens="previewTokens" />
         </div>
         <pre v-if="settled && drawn.error" class="diagram-editor-error" role="alert">{{ drawn.error }}</pre>
       </div>

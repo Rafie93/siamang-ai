@@ -38,7 +38,7 @@ from siamang.documents.author import (
     write_documents,
 )
 from siamang.documents.catalog import SPECS, DocumentStatus, Source, specs_for
-from siamang.documents.diagrams import InvalidDiagram, changed_diagrams, diagrams_of, fenced, line_changes, replace_diagram
+from siamang.documents.diagrams import InvalidDiagram, carry_block, changed_diagrams, diagrams_of, line_changes, replace_diagram
 from siamang.documents.derive import programmer_documents, qa_documents, review_documents
 from siamang.documents.packages import divide, render
 from siamang.documents.lead import (
@@ -1657,10 +1657,7 @@ class Runtime:
                     store.save_documents(run_id, task_id, (Document(SPECS[owner['kind']], DocumentStatus.GENERATED),))
                     document = next(d for d in store.documents(task_id, run_id) if d['kind'] == owner['kind'])
                 written = document['content'] if document['status'] == 'generated' else ''
-                try:
-                    content = replace_diagram(written, owner['diagram'], owner['source'])
-                except IndexError:  # the new document has fewer diagrams: this one still belongs in it
-                    content = f"{written}\n\n{fenced(owner['source'])}".lstrip()
+                content = carry_block(written, owner['diagram'], owner['source'], SPECS[owner['kind']].blocks)
                 if content != document['content']:
                     sha = store.edit_document(document, owner['diagram'], content, owner['edited_by'])
                     documents[owner['kind']] = document | dict(content=content, content_sha256=sha, status='generated')
@@ -1703,15 +1700,16 @@ class Runtime:
                     raise RuntimeRefusal('diagram_not_found', 404)
                 if document['content_sha256'] != base_sha256:
                     raise RuntimeRefusal('document_changed', 409)
+                languages = SPECS[kind].blocks
                 try:
-                    content = replace_diagram(document['content'], index, source)
+                    content = replace_diagram(document['content'], index, source, languages)
                 except InvalidDiagram as exc:
                     raise RuntimeRefusal('diagram_invalid', 422) from exc
                 except IndexError as exc:
                     raise RuntimeRefusal('diagram_not_found', 404) from exc
                 if mode == 'revision':
-                    store.propose_diagram(task_id, kind, index, diagrams_of(content)[index],
-                                          diagrams_of(document['content'])[index], principal.identity)
+                    store.propose_diagram(task_id, kind, index, diagrams_of(content, languages)[index],
+                                          diagrams_of(document['content'], languages)[index], principal.identity)
                     return dict(task_id=task_id, kind=kind, content_sha256=base_sha256, changed=content != document['content'], mode=mode)
                 if content == document['content']:
                     return dict(task_id=task_id, kind=kind, content_sha256=base_sha256, changed=False, mode=mode)
@@ -1739,7 +1737,7 @@ class Runtime:
                 original = store.original_of(task_id, doc['kind']) if doc['edited_by'] and doc['stage'] in DESIGN_STAGES else None
                 if original is not None:
                     items += [dict(kind=doc['kind'], title=doc['title'], edited_by=doc['edited_by'], **change)
-                              for change in changed_diagrams(original, doc['content'])]
+                              for change in changed_diagrams(original, doc['content'], SPECS[doc['kind']].blocks)]
             design = tuple(_stored(r) for r in rows if r['stage'] in DESIGN_STAGES)
             # The smaller of the two inputs: a design divided into packages gets this much.
             delivered = design_input(design, budget=INPUT_DESIGN_BYTES)

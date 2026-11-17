@@ -48,9 +48,10 @@ export const pages = [
     component: () => import('@/pages/CommandPage.vue'),
   },
   {
-    path: '/documents',
+    path: '/documents', // the route keeps its name; only the label changed
     name: 'documents',
-    title: 'Documents',
+    title: 'Artifacts',
+    subtitle: 'Dokumen, diagram, dan desain yang dihasilkan tim untuk task ini.',
     icon: FileText,
     component: () => import('@/pages/DocumentsPage.vue'),
   },
@@ -81,11 +82,11 @@ export const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   scrollBehavior: () => ({ top: 0 }),
   routes: [
-    ...pages.map(({ path, name, title, parent, component }) => ({
+    ...pages.map(({ path, name, title, subtitle, parent, component }) => ({
       path,
       name,
       component,
-      meta: { title, parent },
+      meta: { title, subtitle, parent },
     })),
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

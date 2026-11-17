@@ -137,6 +137,11 @@ describe('markdown from a model', () => {
     ).toEqual(['mermaid', 'code'])
     expect(parseMarkdown('```mermaid\nflowchart TD\n```')[0].text).toBe('flowchart TD')
   })
+  it('keeps the language of other fences, lower-cased', () =>
+    expect(parseMarkdown('```HTML\n<p>x</p>\n```\n\n```json\n{}\n```')).toEqual([
+      { type: 'code', lang: 'html', text: '<p>x</p>' },
+      { type: 'code', lang: 'json', text: '{}' },
+    ]))
   it('survives a code fence that never closes', () =>
     expect(parseMarkdown('```\nabc')[0]).toEqual({ type: 'code', text: 'abc' }))
 })

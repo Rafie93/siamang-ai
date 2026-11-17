@@ -1,7 +1,6 @@
 <script setup>
 import { ChevronDown } from '@lucide/vue'
 import EvidencePanel from '@/components/EvidencePanel.vue'
-import TaskPicker from '@/components/TaskPicker.vue'
 import AppAlert from '@/components/ui/AppAlert.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import { evidenceNote } from '@/domain/evidence.js'
@@ -13,7 +12,6 @@ const SECTIONS = ['plan', 'analysis', 'patch', 'qa', 'review', 'loop']
 
 <template>
   <AppCard title="Laporan proposal">
-    <TaskPicker class="mb" />
     <AppAlert role="note" tone="info" class="mb">Status branch dan PR ada di detail task.</AppAlert>
     <p v-if="!office.reports.length" class="muted mb-0">Belum ada laporan untuk task ini.</p>
     <article v-for="r in office.reports" :key="r.run_id" class="mb">
