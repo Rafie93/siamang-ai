@@ -189,7 +189,7 @@ export function agentDetail(
   const docs = !task
     ? []
     : catalog
-        .filter(s => s.agent === docAgent)
+        .filter(s => s.agent === docAgent && (s.enabled !== false || recorded.has(s.kind)))
         .map(s => {
           const d = recorded.get(s.kind)
           const writingNow = !d && design.running.includes(s.kind)

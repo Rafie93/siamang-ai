@@ -212,3 +212,22 @@ describe('finding one picture among many', () => {
     ).toBe(true)
   })
 })
+
+it('leaves out a document switched off in Settings unless a run already recorded it', () => {
+  const catalog = [
+    { agent: 'planner', stage: 'planning', kind: 'prd', title: 'PRD', source: 'authored', enabled: true },
+    { agent: 'planner', stage: 'planning', kind: 'wbs', title: 'WBS', source: 'authored', enabled: false },
+    {
+      agent: 'planner',
+      stage: 'planning',
+      kind: 'complexity',
+      title: 'Kompleksitas',
+      source: 'authored',
+      enabled: false,
+    },
+  ]
+  const planner = groupDocuments(catalog, [{ kind: 'complexity', status: 'generated', content: 'x' }]).find(
+    g => g.id === 'planner',
+  )
+  expect(planner.documents.map(d => d.kind)).toEqual(['prd', 'complexity'])
+})

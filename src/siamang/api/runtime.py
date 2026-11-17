@@ -584,6 +584,7 @@ class Runtime:
                 task_id = row['task_id']
 
                 state = dict(basis='')
+                off = store.disabled_documents()  # read once: a switch flipped mid-run applies to the next run
 
                 def phase(name, iteration=None, **note):
                     with db.transaction():
@@ -593,31 +594,33 @@ class Runtime:
 
                 def reused_for(stage):
                     """What an earlier run of this task already finished for the stage, on the same basis."""
-                    kinds = {s.kind for s in specs_for(stage, Source.AUTHORED)}
+                    kinds = {s.kind for s in specs_for(stage, Source.AUTHORED, off)}
                     return {k: Document(SPECS[k], DocumentStatus.GENERATED, r['content'], model_id=r['model_id'])
                             for k, r in store.reusable_documents(task_id, run_id, state['basis']).items() if k in kinds}
 
                 def documents(stage, context, *, required=False):
                     agent = next(s.agent for s in SPECS.values() if s.stage == stage)
                     router = self.author(agent)
+                    if not batches(stage, off):
+                        return ()  # every document of the stage is switched off: the agent has nothing to write
                     if not (required and router is not None):
                         if router is not None:
                             phase(stage, iteration=None)
                         with self._working(agent, stage, router):
-                            written = write_documents(router, stage, context)
+                            written = write_documents(router, stage, context, skip=off)
                         store.save_documents(run_id, task_id, written)
                         return written
                     # The stage is several model calls side by side. A round repeats only what failed, with more time,
                     # and each round is its own history row so the owner can see how often a stage was repeated.
                     done = reused_for(stage)
-                    pending = [g for g in (tuple(k for k in group if k not in done) for group in batches(stage)) if g]
+                    pending = [g for g in (tuple(k for k in group if k not in done) for group in batches(stage, off)) if g]
                     if done:
                         store.save_documents(run_id, task_id, tuple(done.values()), state['basis'])
                     if not pending:
                         phase(stage, iteration=None, reused=len(done))  # the history shows it was kept, not rewritten
-                        return tuple(done[k] for g in batches(stage) for k in g)
+                        return tuple(done[k] for g in batches(stage, off) for k in g)
                     reason = None
-                    numbered = {k: i for i, g in enumerate(batches(stage), 1) for k in g}
+                    numbered = {k: i for i, g in enumerate(batches(stage, off), 1) for k in g}
                     with metering.activity(agent, stage):  # every round, retries included
                         for attempt in range(1, DESIGN_ATTEMPTS + 1):
                             phase(stage, iteration=None, attempt=attempt, retry_reason=reason,
@@ -639,7 +642,7 @@ class Runtime:
                             failed = [d for d in written if d.status is DocumentStatus.FAILED]
                             done |= {d.spec.kind: d for d in written if d.status is not DocumentStatus.FAILED}
                             if not failed:
-                                return tuple(done[k] for g in batches(stage) for k in g)
+                                return tuple(done[k] for g in batches(stage, off) for k in g)
                             reason = failed[0].reason or 'unknown'
                             again = {d.spec.kind for d in failed}
                             pending = [tuple(k for k in g if k in again) for g in pending]
@@ -684,7 +687,8 @@ class Runtime:
                                                   for d in owner_diagrams])
                 # A retry resumes from what an earlier run finished, but only for the same instruction, specification and answers.
                 state['basis'] = _basis(task, spec, conversation, project)
-                briefed = len(reused_for('briefing')) == len(specs_for('briefing', Source.AUTHORED))  # the Lead already cleared this
+                briefing = specs_for('briefing', Source.AUTHORED, off)
+                briefed = bool(briefing) and len(reused_for('briefing')) == len(briefing)  # the Lead already cleared this
                 if gated and repo and self.author('lead') and not briefed and not store.draft_of_task(task_id):  # a draft already asked
                     # Only what the Lead really asked: an answer it settled itself is not a round of questions.
                     rounds = sum(1 for m in store.messages(task.project_id, task_id) if m['role'] == 'lead' and m.get('questions'))

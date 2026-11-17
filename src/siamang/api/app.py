@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from siamang import __version__
 from siamang.approval.errors import ApprovalError
-from siamang.documents.catalog import CATALOG
+from siamang.documents.catalog import CATALOG, DEFAULT_DISABLED, SPECS
 from siamang.documents.diagrams import MAX_DIAGRAM_CHARS
 from siamang.ids import new_id
 from siamang.jsondata import thaw
@@ -95,6 +95,12 @@ class NewProject(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     name: str = Field(min_length=1, max_length=120)
     repository: str | None = Field(default=None, max_length=200)
+
+
+class DocumentSettingBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    kind: str = Field(max_length=64)
+    enabled: bool
 
 
 class AgentModelBody(BaseModel):
@@ -229,7 +235,8 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
                                  headers={'X-Accel-Buffering': 'no'})
 
     @app.get('/v0/capabilities')
-    async def capabilities(principal=Depends(permission('read'))):
+    async def capabilities(principal=Depends(permission('read')), db=Depends(database)):
+        off = RunStore(db).disabled_documents()
         try:
             runtime.models()
             configured = True
@@ -240,11 +247,30 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
                 'agent_models': runtime.assignments(),
                 'execution': runtime.execution_features(),
                 'autonomy': dict(level=runtime.autonomy().level, lead=runtime.autonomy().lead),
-                'documents': [dict(agent=s.agent, stage=s.stage, kind=s.kind, title=s.title, source=str(s.source), blocks=list(s.blocks))
-                              for s in CATALOG],
+                'documents': [dict(agent=s.agent, stage=s.stage, kind=s.kind, title=s.title, source=str(s.source), blocks=list(s.blocks),
+                                   enabled=s.kind not in off) for s in CATALOG],
                 'task_statuses': [s.value for s in TaskStatus],
                 'execution_phases': ['queued', 'clarification', 'briefing', 'planning', 'analysis', 'designing', 'design_approval', 'programming',
                                      'qa', 'verifying', 'recovering', 'deciding', 'reviewing', 'reporting', 'awaiting_approval', 'blocked', 'interrupted', 'finished', 'failed', 'cancelled']}
+
+    def document_settings(db):
+        off = RunStore(db).disabled_documents()
+        return {'items': [dict(agent=s.agent, stage=s.stage, kind=s.kind, title=s.title, source=str(s.source),
+                               enabled=s.kind not in off, default_enabled=s.kind not in DEFAULT_DISABLED) for s in CATALOG]}
+
+    @app.get('/v0/settings/documents')
+    async def documents_catalog(principal=Depends(permission('read')), db=Depends(database)):
+        return document_settings(db)
+
+    @app.post('/v0/settings/documents')
+    async def switch_document(body: DocumentSettingBody, principal=Depends(permission('configure')), db=Depends(database)):
+        """Switches one document on or off for every project's next run. Runs already under way keep what they started with."""
+        if not principal.allows_project('*'):  # the setting applies to every project
+            raise RuntimeRefusal('forbidden', 403)
+        if body.kind not in SPECS:
+            raise RuntimeRefusal('invalid_document', 422)
+        RunStore(db).set_document_enabled(body.kind, body.enabled, principal.identity)
+        return document_settings(db)
 
     # Plain def: asking Ollama for its tags must not hold up the event loop.
     @app.get('/v0/settings/models')

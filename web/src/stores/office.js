@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { router } from '@/router'
 import { request, post, items } from '@/services/api.js'
@@ -23,6 +23,20 @@ function remembered() {
     return {}
   }
 }
+// Workspace preferences shared by Settings and the dashboard, remembered per browser.
+const PREFS = 'siamang.prefs'
+function storedPrefs() {
+  try {
+    return JSON.parse(localStorage.getItem(PREFS)) || {}
+  } catch {
+    return {}
+  }
+}
+function storePrefs(prefs) {
+  try {
+    localStorage.setItem(PREFS, JSON.stringify(prefs))
+  } catch {}
+}
 function remember(projectId, taskId) {
   try {
     localStorage.setItem(SELECTION, JSON.stringify({ projectId, taskId }))
@@ -30,6 +44,7 @@ function remember(projectId, taskId) {
 }
 
 export const useOfficeStore = defineStore('office', () => {
+  const prefs = storedPrefs()
   const go = name => router.push({ name })
   const projects = ref([]),
     tasks = ref([]),
@@ -48,8 +63,10 @@ export const useOfficeStore = defineStore('office', () => {
     updated = ref(null),
     description = ref(''),
     priority = ref('normal'),
-    motion = ref(!matchMedia('(prefers-reduced-motion: reduce)').matches),
-    quality = ref('high'),
+    motion = ref(prefs.motion ?? !matchMedia('(prefers-reduced-motion: reduce)').matches),
+    quality = ref(['high', 'low'].includes(prefs.quality) ? prefs.quality : 'high'),
+    // Off: the dashboard shows the team as a conversation instead of the 3D office.
+    scene3d = ref(prefs.scene3d ?? true),
     filter = ref(''),
     offset = ref(0),
     confirm = ref(null),
@@ -420,6 +437,10 @@ export const useOfficeStore = defineStore('office', () => {
     router.push({ name: 'project-detail', params: { id } })
   }
   const teamLog = computed(() => team.value.transitions.slice(-6).reverse())
+  const teamConversation = computed(() => team.value.transitions.slice(-40))
+  watch([motion, quality, scene3d], () =>
+    storePrefs({ motion: motion.value, quality: quality.value, scene3d: scene3d.value }),
+  )
   function toggleDemo() {
     demo.value = !demo.value
     demoStart.value = Date.now()
@@ -965,6 +986,8 @@ export const useOfficeStore = defineStore('office', () => {
     priority,
     motion,
     quality,
+    scene3d,
+    teamConversation,
     filter,
     offset,
     confirm,

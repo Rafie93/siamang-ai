@@ -1,3 +1,9 @@
+const documentSettings = data =>
+  Array.isArray(data.items) &&
+  data.items.every(
+    d => typeof d.kind === 'string' && typeof d.agent === 'string' && typeof d.enabled === 'boolean',
+  )
+
 export function validResponse(path, method, data) {
   const route = path.split('?')[0],
     obj = data && typeof data === 'object' && !Array.isArray(data)
@@ -7,6 +13,7 @@ export function validResponse(path, method, data) {
   if (method === 'POST') {
     if (route === '/settings/models')
       return typeof data.agent === 'string' && typeof data.model_id === 'string'
+    if (route === '/settings/documents') return documentSettings(data)
     if (route === '/tasks')
       return task(data.task) && typeof data.duplicate === 'boolean' && data.scheduled === false
     if (route.endsWith('/design-decision'))
@@ -41,6 +48,7 @@ export function validResponse(path, method, data) {
       )
   }
   if (route === '/health') return ['healthy', 'unhealthy'].includes(data.status)
+  if (route === '/settings/documents') return documentSettings(data)
   if (route === '/settings/models')
     return Array.isArray(data.agents) && Array.isArray(data.options) && Array.isArray(data.unreachable)
   if (route === '/capabilities')

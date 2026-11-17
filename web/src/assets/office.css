@@ -1,9 +1,194 @@
 /* The 3D office. The scene keeps a light floor in both themes, so its overlays use fixed colors. */
+.office-stats {
+  margin-bottom: 16px;
+}
+
+/* The scene and the team panel share one height, so neither leaves a gap under the other. */
 .office-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 16px;
-  align-items: start;
+  height: clamp(560px, calc(100dvh - 330px), 760px);
+  margin-bottom: 24px;
+}
+
+.office-grid > .scene-wrap,
+.office-grid > .card {
+  min-height: 0;
+}
+
+.office-grid .scene-wrap {
+  min-height: 0;
+  height: 100%;
+}
+
+.team-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.team-card > .card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.team-log-wrap {
+  display: flex;
+  flex: 1 1 120px;
+  flex-direction: column;
+  min-height: 120px;
+}
+
+.team-log-wrap .team-log {
+  flex: 1;
+  max-height: none;
+}
+
+.team-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.team-actions > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.team-note {
+  line-height: 1.4;
+}
+
+.office-grid.conversational .team-list button {
+  padding-block: 9px;
+}
+
+/* Dashboard without 3D: the team's handoffs as a chat. */
+.convo-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.convo-card > .card-head {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.convo-head {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.convo-card > .card-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+}
+
+.convo-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  height: 100%;
+  margin: 0;
+  padding: 20px;
+  overflow: auto;
+  list-style: none;
+  background: var(--color-bg);
+}
+
+.convo-empty {
+  margin: auto;
+  max-width: 360px;
+  text-align: center;
+}
+
+.convo-turn {
+  display: flex;
+  gap: 12px;
+  max-width: 760px;
+}
+
+.convo-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.convo-body {
+  min-width: 0;
+}
+
+.convo-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.convo-meta small {
+  font-size: 11.5px;
+}
+
+.convo-bubble {
+  display: inline-block;
+  margin: 0;
+  padding: 9px 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px 12px 12px 12px;
+  background: var(--color-surface);
+  line-height: 1.5;
+}
+
+.convo-turn[data-kind='blocked'] .convo-bubble,
+.convo-turn[data-kind='recovery'] .convo-bubble {
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.convo-turn[data-kind='report'] .convo-bubble {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.convo-reply {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 6px 0 0;
+  color: var(--color-text-2);
+  font-size: 12.5px;
+}
+
+.convo-reply i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.convo-reply b {
+  font-weight: 600;
 }
 
 .scene-wrap {
@@ -451,11 +636,26 @@
 @media (max-width: 1100px) {
   .office-grid {
     grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .office-grid .scene-wrap {
+    height: auto;
+    min-height: 560px;
+  }
+
+  .convo-card {
+    height: 560px;
+  }
+
+  .team-card > .card-body {
+    overflow: visible;
   }
 }
 
 @media (max-width: 850px) {
-  .scene-wrap {
+  .scene-wrap,
+  .office-grid .scene-wrap {
     min-height: 420px;
   }
 }
@@ -514,4 +714,10 @@
   .spinner {
     animation-duration: 2.4s;
   }
+}
+
+.team-actions .btn {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }

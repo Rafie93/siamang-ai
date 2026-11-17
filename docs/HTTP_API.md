@@ -405,6 +405,8 @@ started model call may finish before the worker stops; its proposal is discarded
 | GET | `/v0/capabilities` | read; truthful model configuration, permissions, supported statuses; `execution` = `{sandbox, tools, recovery}`; phases include `verifying` and `recovering` |
 | GET | `/v0/settings/models` | read; each agent's model and what can be chosen: configured models plus the tags Ollama has installed, with `cloud` true when the model is not on this machine |
 | POST | `/v0/settings/models` | configure and an unrestricted `*` scope; body `agent`, `provider`, `provider_model`. Only an offered, available model is accepted. Edits the `SIAMANG_CONFIG` file in place, adding a `[models.*]` table for a new Ollama tag; the agent's next model call uses it, no restart |
+| GET | `/v0/settings/documents` | read; every catalog document with `enabled` and `default_enabled`. Off by default: WBS, complexity, acceptance criteria, dependencies, technical design, UI spec, user flow, accessibility, implementation notes, coverage report, CI results, build artifacts, QA verdict |
+| POST | `/v0/settings/documents` | configure and an unrestricted `*` scope; body `kind`, `enabled`. Stored in the database and applied from the next run on: a switched-off document is neither asked of a model nor recorded. `/v0/capabilities` also carries `enabled` per document |
 | GET | `/v0/openapi.json` | read; generated OpenAPI contract, bearer security scheme |
 | GET | `/v0/stream?after=0` | read; Server-Sent Events for the projects in scope, see [Event stream](#event-stream) |
 | GET | `/v0/projects` | read; scoped registered projects, local root paths withheld |

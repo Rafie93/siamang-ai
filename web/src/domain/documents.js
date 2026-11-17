@@ -22,11 +22,12 @@ export const STATUS_TEXT = {
 }
 export const SOURCE_TEXT = { authored: 'Tulisan model', derived: 'Dihitung sistem', measured: 'Hasil ukur' }
 
+// A document the owner switched off in Settings is left out, unless a run recorded it before it was switched off.
 export function groupDocuments(catalog = [], items = []) {
   const recorded = new Map(items.map(d => [d.kind, d]))
   return DOCUMENT_AGENTS.map(agent => {
     const documents = catalog
-      .filter(s => s.agent === agent.id)
+      .filter(s => s.agent === agent.id && (s.enabled !== false || recorded.has(s.kind)))
       .map(s => ({
         ...s,
         status: 'pending',

@@ -40,7 +40,8 @@ TOKENS = {'operator': 'stream-operator-credential-' + 'a' * 32, 'other': 'stream
 UNWATCHED = {'api_schema': 'internal', 'api_changes': 'the log itself', 'api_document_basis': 'reuse key, never shown',
              'api_design_decisions': 'commits with the run update that moves past the gate',
              'api_task_features': 'written only with task.accepted',
-             'api_usage_since': 'one row, written once when token recording begins'}
+             'api_usage_since': 'one row, written once when token recording begins',
+             'api_document_settings': 'a setting read at the start of the next run, not part of any task'}
 
 
 def bearer(who='operator'):

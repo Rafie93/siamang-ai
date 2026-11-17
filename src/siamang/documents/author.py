@@ -102,9 +102,12 @@ def _schema(specs):
     }
 
 
-def batches(stage: str) -> tuple[tuple[str, ...], ...]:
-    """The authored documents of a stage in groups that one model call can write within its time."""
-    kinds = tuple(s.kind for s in specs_for(stage, Source.AUTHORED))
+def batches(stage: str, skip: frozenset[str] = frozenset()) -> tuple[tuple[str, ...], ...]:
+    """The authored documents of a stage in groups that one model call can write within its time.
+
+    ``skip`` holds the documents the owner switched off: they are never asked of the model.
+    """
+    kinds = tuple(s.kind for s in specs_for(stage, Source.AUTHORED, skip))
     return tuple(kinds[i:i + BATCH_SIZE] for i in range(0, len(kinds), BATCH_SIZE))
 
 
@@ -194,9 +197,10 @@ def write_batches(router: ModelRouter | None, stage: str, groups: Sequence[Seque
 
 
 def write_documents(router: ModelRouter | None, stage: str, context: Mapping[str, Any],
-                    timeout_secs: float = MODEL_TIMEOUT_SECS) -> tuple[Document, ...]:
-    """Every authored document of the stage, once. Never raises for a model failure: each document records what happened."""
-    return write_batches(router, stage, batches(stage), context, timeout_secs)
+                    timeout_secs: float = MODEL_TIMEOUT_SECS, skip: frozenset[str] = frozenset()) -> tuple[Document, ...]:
+    """Every authored document of the stage that is switched on, once. Never raises for a model failure."""
+    groups = batches(stage, skip)
+    return write_batches(router, stage, groups, context, timeout_secs) if groups else ()
 
 
 def _parse(specs, response):

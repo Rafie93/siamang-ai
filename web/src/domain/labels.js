@@ -14,6 +14,7 @@ export const ERROR_TEXT = {
   model_not_available: 'Model itu tidak tersedia lagi. Periksa ollama serve lalu coba lagi.',
   config_not_editable: 'siamang.toml tidak bisa diubah dari sini. Ubah langsung di file-nya.',
   config_invalid: 'siamang.toml tidak valid. Perbaiki file-nya dulu.',
+  invalid_document: 'Dokumen itu tidak dikenal.',
   lead_returned_empty_brief: 'Amang tidak menghasilkan ringkasan. Kirim pesan lagi untuk mencoba ulang.',
   rate_limited: 'Batas pemakaian model tercapai. Coba lagi nanti.',
   model_timeout: 'Model terlalu lama menjawab. Coba lagi.',

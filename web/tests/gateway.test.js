@@ -22,9 +22,12 @@ it('allows the task conversation and nothing beside it', () => {
   expect(permitted('POST', '/v0/projects/prj_a/drafts/dft_b/delete')).toBe(false)
   expect(permitted('POST', '/v0/projects/prj_a/drafts/../x')).toBe(false)
 })
-it('allows choosing models on exactly one settings route', () => {
+it('allows choosing models and documents on exactly their settings routes', () => {
   expect(permitted('GET', '/v0/settings/models')).toBe(true)
   expect(permitted('POST', '/v0/settings/models')).toBe(true)
+  expect(permitted('GET', '/v0/settings/documents')).toBe(true)
+  expect(permitted('POST', '/v0/settings/documents')).toBe(true)
+  expect(permitted('POST', '/v0/settings/documents/x')).toBe(false)
   expect(permitted('POST', '/v0/settings')).toBe(false)
   expect(permitted('POST', '/v0/settings/providers')).toBe(false)
   expect(permitted('POST', '/v0/settings/models/x')).toBe(false)

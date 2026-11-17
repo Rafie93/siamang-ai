@@ -41,7 +41,7 @@ const toggleCollapsed = () => {
     // Storage may be blocked; the sidebar still toggles for this visit.
   }
 }
-const navPages = pages.filter(p => p.icon)
+const navPages = pages.filter(p => p.icon && !p.hidden)
 const themeIcon = computed(() => ({ light: Sun, dark: Moon, system: Monitor })[mode.value])
 const themeLabel = computed(
   () => ({ light: 'Tema terang', dark: 'Tema gelap', system: 'Tema mengikuti sistem' })[mode.value],

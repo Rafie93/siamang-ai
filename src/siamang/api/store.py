@@ -4,6 +4,7 @@ import hmac
 import json
 from datetime import UTC, datetime
 
+from siamang.documents.catalog import disabled_kinds
 from siamang.ids import new_id
 
 from .codec import decode
@@ -204,6 +205,10 @@ class RunStore:
             conn.execute('CREATE TABLE IF NOT EXISTS api_usage_since (singleton INTEGER PRIMARY KEY CHECK(singleton=1), '
                          'since TEXT NOT NULL) STRICT')
             conn.execute('INSERT OR IGNORE INTO api_usage_since VALUES (1, ?)', (now(),))
+            # Which documents the owner switched on or off; a kind with no row keeps the catalog's default.
+            conn.execute('''CREATE TABLE IF NOT EXISTS api_document_settings (
+                kind TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+                updated_by TEXT NOT NULL, updated_at TEXT NOT NULL) STRICT''')
             self._install_change_log(conn)
 
     @staticmethod
@@ -285,9 +290,25 @@ class RunStore:
                                     (task_id, count)).fetchall()
         return [dict(timestamp=r['timestamp'], **json.loads(r['payload'])) for r in reversed(rows)]
 
+    def document_overrides(self):
+        return {r['kind']: bool(r['enabled']) for r in self.db.conn.execute('SELECT kind, enabled FROM api_document_settings')}
+
+    def disabled_documents(self):
+        return disabled_kinds(self.document_overrides())
+
+    def set_document_enabled(self, kind, enabled, actor):
+        with self.db.transaction() as conn:
+            conn.execute('INSERT INTO api_document_settings VALUES (?,?,?,?) ON CONFLICT(kind) DO UPDATE SET '
+                         'enabled=excluded.enabled, updated_by=excluded.updated_by, updated_at=excluded.updated_at',
+                         (kind, int(enabled), actor, now()))
+
     def save_documents(self, run_id, task_id, documents, basis=''):
+        """Records each document, except those the owner switched off: a switched-off document is never recorded."""
+        off = self.disabled_documents()
         with self.db.transaction() as conn:
             for d in documents:
+                if d.spec.kind in off:
+                    continue
                 # A rerun after the owner's answer replaces what the earlier attempt recorded, but never loses an owner's edit.
                 sha = hashlib.sha256(d.content.encode()).hexdigest()
                 replaced = conn.execute(f'SELECT d.*, {_EDITED_BY} FROM api_documents d WHERE d.run_id=? AND d.kind=?',
