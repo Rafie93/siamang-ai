@@ -24,6 +24,7 @@ export function validResponse(path, method, data) {
     if (route.endsWith('/intake/messages')) return data.state === 'thinking'
     if (route.endsWith('/intake/approve')) return data.state === 'approved'
     if (route.endsWith('/publish')) return data.publication === 'publishing'
+    if (route.endsWith('/chat')) return typeof data.agent === 'string' && data.state === 'thinking'
     if (/^\/tasks\/[^/]+\/messages$/.test(route)) return data.state === 'scheduled'
     if (/\/drafts$/.test(route)) return typeof data.draft_id === 'string' && data.state === 'thinking'
     if (/\/drafts\/[^/]+\/messages$/.test(route)) return data.state === 'thinking'
@@ -56,6 +57,14 @@ export function validResponse(path, method, data) {
       data.items.every(
         d => typeof d.draft_id === 'string' && typeof d.state === 'string' && Array.isArray(d.messages),
       )
+    )
+  if (route.endsWith('/chat'))
+    return (
+      Array.isArray(data.items) &&
+      typeof data.agent === 'string' &&
+      typeof data.thinking === 'boolean' &&
+      typeof data.available === 'boolean' &&
+      data.items.every(m => ['owner', 'agent'].includes(m.role) && Number.isInteger(m.position))
     )
   if (route.endsWith('/intake')) return Array.isArray(data.messages)
   if (route.endsWith('/messages')) return Array.isArray(data.items)

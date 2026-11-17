@@ -120,28 +120,51 @@ def _output(model, done):
     if not isinstance(data, dict):
         raise GenerationError('invalid claude CLI response')
     if data.get('is_error') is not False or done.returncode != 0:
-        raise _failure(data)
+        raise _spent(_failure(data), data)
     if not isinstance(data.get('result'), str):
-        raise GenerationError('claude CLI did not return a completed text response')
+        raise _spent(GenerationError('claude CLI did not return a completed text response'), data)
     served = data.get('modelUsage')
     # Aliases resolve to full IDs (sonnet -> claude-sonnet-5-5), so match on containment.
     if not isinstance(served, dict) or not any(model.provider_model in k or k in model.provider_model for k in served):
-        raise GenerationError('claude CLI returned another model')
+        raise _spent(GenerationError('claude CLI returned another model'), data)
     structured = data.get('structured_output')
     content = data['result'] if structured is None else json.dumps(structured, ensure_ascii=False)
     reason = FinishReason.LENGTH if data.get('stop_reason') == 'max_tokens' else FinishReason.STOP
-    return ProviderOutput(content, reason, _usage(data.get('usage')), structured,
+    return ProviderOutput(content, reason, _usage(data), structured,
                           {'served_models': sorted(served), 'list_cost_usd': data.get('total_cost_usd')})
 
 
-def _usage(usage):
-    if not isinstance(usage, dict):
-        return Usage()
-    counts = [usage.get(k) for k in ('input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens')]
-    output = usage.get('output_tokens')
-    if any(v is not None and (type(v) is not int or v < 0) for v in [*counts, output]):
-        raise GenerationError('invalid claude CLI token usage')
-    return Usage(sum(v or 0 for v in counts), output)
+PER_MODEL = ('inputTokens', 'cacheCreationInputTokens', 'cacheReadInputTokens', 'outputTokens')
+TOTALS = ('input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens')
+
+
+def _usage(data):
+    """Every token the call used. ``input_tokens`` alone counts only what missed the prompt cache (a real call reads 2
+    that way and 1,103 from the cache), so the cache is part of the input. ``modelUsage`` holds each model's total over
+    every turn of the call, ``--json-schema`` making two; ``usage`` stands in when it lacks the numbers."""
+    rows = list(data['modelUsage'].values()) if isinstance(data.get('modelUsage'), dict) else []
+    if rows and all(isinstance(r, dict) and all(k in r for k in PER_MODEL) for r in rows):
+        values = [[r[k] for r in rows] for k in PER_MODEL]
+        if any(type(v) is not int or v < 0 for column in values for v in column):
+            raise GenerationError('invalid claude CLI token usage')
+        fresh, written, read, output = (sum(column) for column in values)
+    else:
+        usage = data.get('usage')
+        if not isinstance(usage, dict):
+            return Usage()
+        fresh, written, read, output = (usage.get(k) for k in TOTALS)
+        if any(v is not None and (type(v) is not int or v < 0) for v in (fresh, written, read, output)):
+            raise GenerationError('invalid claude CLI token usage')
+    return Usage(sum(v or 0 for v in (fresh, written, read)), output, cache_read_tokens=read, cache_write_tokens=written)
+
+
+def _spent(error, data):
+    """A call that failed after the model ran still used its tokens, when the CLI reports them."""
+    try:
+        error.usage = _usage(data)
+    except GenerationError:
+        error.usage = None
+    return error
 
 
 def _failure(data):

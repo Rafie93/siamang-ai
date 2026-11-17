@@ -1,13 +1,60 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import AgentChat from '@/components/AgentChat.vue'
 import StatusChip from '@/components/StatusChip.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppDialog from '@/components/ui/AppDialog.vue'
+import AppTabs from '@/components/ui/AppTabs.vue'
 import AppTag from '@/components/ui/AppTag.vue'
+import { callsText, timeText, tokenCell, tokenExact, tokenTitle, usageAgentFor } from '@/domain/usage.js'
+import { request } from '@/services/api.js'
 import { useOfficeStore } from '@/stores/office'
 
 const office = useOfficeStore()
 const detail = computed(() => (office.agentPopup ? office.agentInfo(office.agentPopup) : null))
+
+// What this agent used on the task in front of it. Read when the dialog opens and again as the agent moves to another
+// stage: that follows it closely enough without a request for every model call. Each source is compared on its own,
+// so the detail being rebuilt every second by the clock reads nothing again.
+const spent = ref(null)
+watch(
+  [() => detail.value?.id, () => detail.value?.task_id, () => detail.value?.label],
+  async ([agent, taskId], before) => {
+    if (!before || agent !== before[0] || taskId !== before[1]) spent.value = null
+    if (!agent || !taskId || detail.value?.simulated) return
+    const usage = await request(`/tasks/${taskId}/usage`).catch(() => null)
+    if (!usage || detail.value?.id !== agent || detail.value?.task_id !== taskId) return
+    spent.value = usage.agents.find(a => a.agent === usageAgentFor(agent)) || {
+      calls: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      total_tokens: 0,
+      active_ms: 0,
+    }
+  },
+  { immediate: true },
+)
+// Asking the agent: about the task in front of it, or about the project it belongs to.
+const tab = ref('overview')
+const chatScope = ref('task')
+const chatAgent = computed(() => usageAgentFor(detail.value?.id))
+const chatProject = computed(() => office.stage.task?.project_id || office.projectId || '')
+const chatTask = computed(() => (chatScope.value === 'task' ? detail.value?.task_id || '' : ''))
+const tabs = computed(() =>
+  detail.value?.simulated
+    ? []
+    : [
+        { value: 'overview', label: 'Ringkasan' },
+        { value: 'chat', label: 'Tanya' },
+      ],
+)
+watch(
+  () => detail.value?.id,
+  () => {
+    tab.value = 'overview'
+    chatScope.value = detail.value?.task_id ? 'task' : 'project'
+  },
+)
 const close = () => {
   office.agentPopup = ''
 }
@@ -46,7 +93,26 @@ const subtitle = computed(() =>
       />
     </template>
 
-    <div class="stack">
+    <AppTabs v-if="tabs.length" v-model="tab" :tabs="tabs" class="mb" />
+
+    <div v-if="tab === 'chat'" class="stack">
+      <AppTabs
+        v-model="chatScope"
+        :tabs="[
+          ...(detail.task_id ? [{ value: 'task', label: 'Task ini', note: detail.task }] : []),
+          { value: 'project', label: 'Proyek' },
+        ]"
+      />
+      <AgentChat
+        v-if="chatAgent && chatProject"
+        :agent="chatAgent"
+        :project-id="chatProject"
+        :task-id="chatTask"
+      />
+      <p v-else class="small muted">Pilih proyek dulu untuk bertanya kepada agen ini.</p>
+    </div>
+
+    <div v-else class="stack">
       <section aria-live="polite" class="agent-now" :data-working="detail.working">
         <div class="row">
           <span v-if="detail.working" class="spinner" aria-hidden="true" />
@@ -57,6 +123,29 @@ const subtitle = computed(() =>
         </p>
         <small v-if="detail.since" class="muted">Tahap ini berjalan {{ detail.since }}</small>
         <p v-if="detail.pending.length" class="small mb-0">Sedang ditulis: {{ detail.pending.join(', ') }}</p>
+      </section>
+
+      <section v-if="spent" aria-label="Pemakaian token agent ini">
+        <h3 class="section-title">Pemakaian di task ini</h3>
+        <dl class="project-stats usage-totals">
+          <div :title="spent.calls ? tokenTitle(spent) : undefined">
+            <dd>{{ tokenCell(spent, 'input_tokens') }}</dd>
+            <dt>Input</dt>
+          </div>
+          <div :title="tokenExact(spent.output_tokens ?? 0)">
+            <dd>{{ tokenCell(spent, 'output_tokens') }}</dd>
+            <dt>Output</dt>
+          </div>
+          <div :title="tokenExact(spent.total_tokens ?? 0)">
+            <dd>{{ tokenCell(spent, 'total_tokens') }}</dd>
+            <dt>Total token</dt>
+          </div>
+          <div title="Lama agent ini bekerja; pekerjaan paralel dihitung sekali">
+            <dd>{{ timeText(spent.active_ms) }}</dd>
+            <dt>Durasi</dt>
+          </div>
+        </dl>
+        <small class="muted">{{ callsText(spent) }}</small>
       </section>
 
       <section v-if="detail.projects.length">

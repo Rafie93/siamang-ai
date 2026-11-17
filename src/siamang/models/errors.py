@@ -30,6 +30,9 @@ class ModelErrorCode(StrEnum):
 class ModelError(Exception):
     code: ModelErrorCode = ModelErrorCode.UNKNOWN_ERROR
     retryable: bool = False
+    # The tokens a call used before it failed (a ``Usage``), when the provider reported them: a reply that arrives
+    # but cannot be used still cost its tokens. ``None`` when nothing is known, as after a timeout.
+    usage: Any = None
 
     def __init__(
         self,

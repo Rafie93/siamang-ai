@@ -6,6 +6,7 @@ Notable changes to Siamang. No version has been tagged as a GitHub release yet.
 
 ### Added
 
+- Tokens and time per project, task, and agent. Every model call is recorded with its agent, stage, and input and output tokens, failed calls included, and every stretch of an agent's work is timed, model or not. Input counts the prompt cache, which holds most of a Claude prompt. Parallel work counts once, a draft's conversation counts toward the task it became, and the project's intake shows apart as "outside tasks". `GET /v0/tasks/{id}/usage` and `GET /v0/projects/{id}/usage`; task lists and the portfolio carry a short total. API schema 8. The web interface shows a **Pemakaian** tab on each project, a token and duration column in the task list, a per-agent table in the task detail, and the agent's own share in the office dialog. Work from before this version has durations but no token record, and the page says so.
 - Sandbox execution (opt-in): tests and builds run in a container, and that result decides whether a run passes. Not yet tested with a real container.
 - Programmer tools (opt-in): the Programmer edits and runs commands in the sandbox before proposing a patch.
 - Recovery Engine (opt-in): three tiers of bounded recovery when delivery fails. Not yet applied to parallel-package runs.

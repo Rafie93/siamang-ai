@@ -50,6 +50,10 @@ export const ERROR_TEXT = {
   commit_failed: 'Commit gagal dibuat.',
   base_branch_missing: 'Branch utama proyek tidak ditemukan.',
   pull_request_failed: 'Commit sudah terkirim, tetapi PR gagal dibuka.',
+  agent_has_no_model: 'Agen ini belum diberi model. Pilih di halaman Settings.',
+  agent_busy: 'Agen ini masih menjawab pertanyaan sebelumnya.',
+  unknown_agent: 'Agen ini tidak dikenal.',
+  generation_error: 'Agen tidak memberi jawaban yang bisa dibaca. Coba tanyakan lagi.',
 }
 export const errorText = code => ERROR_TEXT[code] || code || 'Terjadi kesalahan.'
 

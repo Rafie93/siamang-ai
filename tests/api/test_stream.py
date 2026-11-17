@@ -39,7 +39,8 @@ TOKENS = {'operator': 'stream-operator-credential-' + 'a' * 32, 'other': 'stream
 # Tables that hold no state a reader can see, or whose every write commits beside a watched one.
 UNWATCHED = {'api_schema': 'internal', 'api_changes': 'the log itself', 'api_document_basis': 'reuse key, never shown',
              'api_design_decisions': 'commits with the run update that moves past the gate',
-             'api_task_features': 'written only with task.accepted'}
+             'api_task_features': 'written only with task.accepted',
+             'api_usage_since': 'one row, written once when token recording begins'}
 
 
 def bearer(who='operator'):
@@ -271,7 +272,7 @@ def test_upgrading_an_older_database_adds_the_log_and_keeps_its_rows(world):
             db.conn.execute(f"DROP TRIGGER {row['name']}")
         db.conn.execute('DROP TABLE api_changes')
     with initialized(world[0].database) as db:
-        assert db.conn.execute('SELECT version FROM api_schema').fetchone()[0] == 7
+        assert db.conn.execute('SELECT version FROM api_schema').fetchone()[0] == 8
         store = RunStore(db)
         assert store.change_bounds() == (0, 0)
         run_id = store.create(created.task_id)

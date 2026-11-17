@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 import StatusChip from '@/components/StatusChip.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import { errorText, projectStep } from '@/domain/labels.js'
+import { tokenCell, tokenTitle } from '@/domain/usage.js'
 import { useOfficeStore } from '@/stores/office'
 
 const office = useOfficeStore()
@@ -67,6 +68,10 @@ const chipStatus = step =>
           <dt>Fitur</dt>
         </div>
       </dl>
+      <p v-if="p.usage?.calls" class="small muted mt mb-0" :title="tokenTitle(p.usage)">
+        Token terpakai <strong>{{ tokenCell(p.usage, 'total_tokens') }}</strong> · input
+        {{ tokenCell(p.usage, 'input_tokens') }} · output {{ tokenCell(p.usage, 'output_tokens') }}
+      </p>
     </RouterLink>
   </div>
 </template>

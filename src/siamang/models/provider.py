@@ -36,11 +36,19 @@ from siamang.models.errors import (
     UnsupportedCapabilityError,
     normalize_exception,
 )
+import siamang.models.metering as metering
 from siamang.models.capabilities import format_capabilities
 from siamang.models.request import ModelRequest, ResponseFormat
-from siamang.models.response import ModelResponse, ProviderOutput
+from siamang.models.response import ModelResponse, ProviderOutput, Usage
 
 log = get_logger("models.provider")
+
+
+def _spent(error: ModelError, output: ProviderOutput) -> ModelError:
+    """The reply arrived but cannot be used: its tokens were still spent."""
+    if isinstance(output.usage, Usage):
+        error.usage = output.usage
+    return error
 
 
 class ModelProvider(ABC):
@@ -106,7 +114,26 @@ class ModelProvider(ABC):
         where = {"provider_id": self.provider_id, "model_id": model.model_id, "request_id": request.request_id}
         self._precheck(model, request, where)
 
-        started = time.monotonic()
+        started, started_at = time.monotonic(), metering.stamp()
+        response: ModelResponse | None = None
+        error: ModelError | None = None
+        try:
+            response = self._respond(model, request, where, started)
+        except ModelError as exc:
+            error = exc
+        # Every call that reached the adapter is counted, the failed ones too: a reply that cannot be used still cost
+        # its tokens, and a timeout still cost the time.
+        metering.observe(
+            request_id=request.request_id, purpose=request.metadata.get("purpose"), stage=request.metadata.get("stage"),
+            provider_id=self.provider_id, model_id=model.model_id, outcome="ok" if error is None else str(error.code),
+            usage=response.usage if response is not None else error.usage, started_at=started_at,
+            duration_ms=metering.elapsed_ms(started))
+        if error is not None:
+            raise error  # raised outside `except`: no vendor exception in __context__
+        return response
+
+    def _respond(self, model: ModelDefinition, request: ModelRequest, where: dict[str, str], started: float) -> ModelResponse:
+        """One adapter call, checked. Raises only :class:`ModelError`, and never from inside ``except``."""
         error: ModelError | None = None
         try:
             output = self._generate(model, request)
@@ -119,7 +146,7 @@ class ModelProvider(ABC):
         if not isinstance(output, ProviderOutput):
             raise GenerationError(f"adapter returned {type(output).__name__}, expected ProviderOutput", **where)
         if not isinstance(output.content, str):
-            raise GenerationError("adapter returned non-string content", **where)
+            raise _spent(GenerationError("adapter returned non-string content", **where), output)
 
         structured = output.structured_output
         if request.response_format is ResponseFormat.JSON and structured is None:
@@ -128,7 +155,7 @@ class ModelProvider(ABC):
             except ValueError:
                 structured = None
             if structured is None:
-                raise GenerationError("model did not return valid JSON for response_format='json'", **where)
+                raise _spent(GenerationError("model did not return valid JSON for response_format='json'", **where), output)
 
         duration_ms = round((time.monotonic() - started) * 1000, 3)
         log.debug(

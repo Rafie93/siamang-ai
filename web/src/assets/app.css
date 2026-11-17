@@ -1124,6 +1124,27 @@ details[open] > .collapse-head .collapse-chevron {
   line-height: 1.3;
 }
 
+/* Tokens and time: as many totals as fit on a row, and columns of numbers that line up. */
+.usage-totals {
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  margin-top: 0;
+}
+
+.table .num {
+  text-align: end;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-table td {
+  vertical-align: top;
+}
+
+.usage-table .usage-task {
+  padding: 0;
+  text-align: start;
+}
+
 .project-empty {
   padding: 48px 20px;
   text-align: center;

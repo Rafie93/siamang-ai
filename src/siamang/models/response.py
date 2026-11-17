@@ -21,8 +21,17 @@ class FinishReason(StrEnum):
 
 @dataclass(frozen=True)
 class Usage:
+    """Tokens as the provider reported them; ``None`` means it reported nothing.
+
+    ``input_tokens`` is every input token the model read, prompt cache included. ``cache_read_tokens`` and
+    ``cache_write_tokens`` say how much of that input came from, or went into, a prompt cache; ``None`` when the
+    provider reports no cache.
+    """
+
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
 
     @property
     def total_tokens(self) -> int | None:
@@ -75,6 +84,8 @@ class ModelResponse:
                 "input_tokens": self.usage.input_tokens,
                 "output_tokens": self.usage.output_tokens,
                 "total_tokens": self.usage.total_tokens,
+                "cache_read_tokens": self.usage.cache_read_tokens,
+                "cache_write_tokens": self.usage.cache_write_tokens,
             },
             "metadata": dict(self.metadata),
         }

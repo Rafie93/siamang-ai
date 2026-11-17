@@ -67,7 +67,9 @@ export const useOfficeStore = defineStore('office', () => {
     live = ref(null),
     streaming = ref(false),
     agentPopup = ref(''),
-    bubbleAgent = ref('')
+    bubbleAgent = ref(''),
+    // The last chat thread with an agent that changed, as { project_id, task_id }: an open chat reloads when it is its own.
+    agentChatChange = ref(null)
   const taskError = ref(''),
     detailRequest = ref(0),
     backendOutdated = ref(false),
@@ -81,6 +83,10 @@ export const useOfficeStore = defineStore('office', () => {
     taskMessages = ref([]),
     taskDraft = ref(''),
     revisesId = ref('')
+  // Tokens and time per agent. The project's is loaded only while a view shows it: it reads every call of the project.
+  const taskUsage = ref(null),
+    projectUsage = ref(null)
+  let projectUsageViews = 0
   const portfolio = ref([]),
     documents = ref([]),
     documentAgent = ref('lead'),
@@ -531,13 +537,19 @@ export const useOfficeStore = defineStore('office', () => {
         remember(id, selectedId.value)
         const whole = selectedId.value !== before // a task picked just now: none of its details are here yet
         const needs = name => whole || has(name)
-        if (selectedId.value && ['task', 'reports', 'events', 'documents', 'messages'].some(needs)) {
+        if (has('projectUsage') && projectUsageViews) {
+          // ``false``: the backend has no record to give (an older one has no route), not "still loading".
+          const shown = await request(`/projects/${id}/usage`).catch(() => false)
+          if (id === projectId.value) projectUsage.value = shown
+        }
+        if (selectedId.value && ['task', 'reports', 'events', 'documents', 'messages', 'usage'].some(needs)) {
           const taskId = selectedId.value
-          const [t, r, e, d] = await Promise.all([
+          const [t, r, e, d, u] = await Promise.all([
             needs('task') ? request('/tasks/' + taskId) : null,
             needs('reports') ? request('/tasks/' + taskId + '/reports') : null,
             needs('events') ? loadEvents(taskId, events.value) : null,
             needs('documents') ? request('/tasks/' + taskId + '/documents') : null,
+            needs('usage') ? request('/tasks/' + taskId + '/usage').catch(() => null) : null,
           ])
           if (taskId === selectedId.value) {
             if (t && (!t.task_id || typeof t.status !== 'string')) throw Error('malformed_response')
@@ -549,6 +561,7 @@ export const useOfficeStore = defineStore('office', () => {
             if (r) reports.value = items(r)
             if (e) events.value = mergeEvents(knownEvents(events.value, taskId), e)
             if (d) documents.value = items(d)
+            if (needs('usage')) taskUsage.value = u?.task_id === taskId ? u : false
             // Whether a diagram can be edited follows the task's state too, which a new stage does not change.
             const editState = [
               selected.value?.status,
@@ -641,6 +654,8 @@ export const useOfficeStore = defineStore('office', () => {
       const shown = knownEvents(live.value?.events, data.task_id)
       if (shown.length) live.value = { ...live.value, events: mergeEvents(shown, [data.event]) }
     }
+    if (type === 'changed' && data.parts?.includes('agent_chat'))
+      agentChatChange.value = { project_id: data.project_id, task_id: data.task_id ?? null }
     if (!scopes.size) return
     for (const scope of scopes) frameScopes.add(scope)
     frameTimer ??= setTimeout(() => {
@@ -672,9 +687,21 @@ export const useOfficeStore = defineStore('office', () => {
       refresh()
     }
   }
+  /** A view that shows the project's usage keeps it loaded and live; call what it returns when the view goes. */
+  function watchProjectUsage() {
+    projectUsageViews++
+    load(new Set(['projectUsage']))
+    let released = false
+    return () => {
+      if (!released) projectUsageViews--
+      released = true
+    }
+  }
   async function changeProject() {
     draft.value = null
     intake.value = null
+    projectUsage.value = null
+    taskUsage.value = null
     intakeDraft.value = ''
     revisesId.value = ''
     taskMessages.value = []
@@ -698,6 +725,7 @@ export const useOfficeStore = defineStore('office', () => {
     reports.value = []
     events.value = []
     documents.value = []
+    taskUsage.value = null
     documentKind.value = ''
     await refresh()
   }
@@ -822,6 +850,7 @@ export const useOfficeStore = defineStore('office', () => {
     reports.value = []
     events.value = []
     documents.value = []
+    taskUsage.value = null
     documentKind.value = ''
   }
   function pickProject(id) {
@@ -876,6 +905,9 @@ export const useOfficeStore = defineStore('office', () => {
     disconnectStream()
   }
   return {
+    taskUsage,
+    projectUsage,
+    watchProjectUsage,
     redivide,
     saveDiagram,
     designEdits,
@@ -892,6 +924,7 @@ export const useOfficeStore = defineStore('office', () => {
     taskCount,
     approvalCount,
     agentPopup,
+    agentChatChange,
     bubbleAgent,
     agentBubble,
     agentInfo,

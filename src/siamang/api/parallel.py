@@ -23,6 +23,7 @@ from siamang.ids import new_id
 from siamang.jsondata import thaw
 from siamang.loop import LoopRequest, LoopService
 from siamang.loop.policy import LoopPolicy
+import siamang.models.metering as metering
 from siamang.programmer import Programmer
 from siamang.programmer.change import BeforeState, Operation, ProposedChange, change_id
 from siamang.programmer.errors import ChangeRejectedError
@@ -241,26 +242,29 @@ class PackageRun:
             def program(self, request):
                 self.iteration += 1
                 step('programming', self.iteration)
-                result = super().program(request)
-                outside = [c.path for c in result.changes if not owned(c.path, owns)]
-                if outside:  # told once what it may touch; a second breach stops the package
-                    note = dict(thaw(request.input), outside_owned_paths=outside[:10], allowed_paths=list(owns))
-                    result = super().program(replace(request, input=note))
-                    if any(not owned(c.path, owns) for c in result.changes):
-                        result = self._failed(request, ChangeRejectedError('a change is outside the owned paths'),
-                                              {'warnings': [], 'unknowns': []}, {})
+                with metering.activity('programmer', 'programming', package=key):
+                    result = super().program(request)
+                    outside = [c.path for c in result.changes if not owned(c.path, owns)]
+                    if outside:  # told once what it may touch; a second breach stops the package
+                        note = dict(thaw(request.input), outside_owned_paths=outside[:10], allowed_paths=list(owns))
+                        result = super().program(replace(request, input=note))
+                        if any(not owned(c.path, owns) for c in result.changes):
+                            result = self._failed(request, ChangeRejectedError('a change is outside the owned paths'),
+                                                  {'warnings': [], 'unknowns': []}, {})
                 self.last = result
                 return result
 
         class Checking(rooted(QAService, root)):
             def verify(self, request):
                 step('qa', programmer.iteration)
-                return super().verify(request)
+                with metering.activity('qa', 'qa', package=key):
+                    return super().verify(request)
 
         class Reviewing(ReviewerService):
             def review(self, request):
                 step('reviewing', programmer.iteration)
-                return super().review(request)
+                with metering.activity('reviewer', 'reviewing', package=key):
+                    return super().review(request)
 
         programmer = Coding(engine, models=self.runtime.models('programmer'), policy=PACKAGE_POLICY,
                             **self.runtime.programmer_options())
@@ -342,7 +346,7 @@ class PackageRun:
                     with ThreadPoolExecutor(max_workers=max(1, min(self.limit, len(pending))),
                                             thread_name_prefix='siamang-package') as pool:
                         for row in pending:
-                            pool.submit(self.run_one, row, done)
+                            metering.submit(pool, self.run_one, row, done)  # each package metered as the run's
                     if self.stopped.is_set():
                         raise PackageStopped()
                 rows = store.work_packages(self.run_id)
