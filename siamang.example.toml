@@ -40,7 +40,7 @@ name = "Local echo (wiring test)"
 # capabilities = ["text_generation", "structured_output"]
 # priority = 10
 
-# The model an agent uses (HTTP runs): lead, planner, analyst, programmer, qa, reviewer.
+# The model an agent uses (HTTP runs): lead, planner, analyst, designer, programmer, qa, reviewer.
 # [agents.programmer]
 # model = "claude-sonnet"
 # parallel = 3            # work packages at the same time within one wave (1-6); more uses subscription limits faster

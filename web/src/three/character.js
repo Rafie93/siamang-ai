@@ -22,6 +22,7 @@ const LOOKS = {
     headphones: true,
     hood: true,
   },
+  designer: { skin: 0xd7a07c, shirt: 0xc25b9e, pants: 0x2f2a36, hair: 0x3a2418, beret: 0x2b2d42 },
   qa: { skin: 0x9c6b4a, shirt: 0x3f9a63, pants: 0x3a3f45, hair: 0x14110f, cap: true },
   reviewer: {
     skin: 0xe2b896,
@@ -92,6 +93,10 @@ export function createCharacter(id, kit, { color = '#888' } = {}) {
   if (look.headphones) {
     box([0.34, 0.03, 0.05], 0x222222, [0, 0.29, 0], head)
     for (const x of [-0.16, 0.16]) box([0.05, 0.09, 0.09], 0x222222, [x, 0.13, 0], head)
+  }
+  if (look.beret) {
+    const b = ball(0.16, look.beret, [0.03, 0.24, -0.01], head)
+    b.scale.set(0.36, 0.12, 0.34)
   }
   if (look.glasses) {
     box([0.2, 0.03, 0.01], 0x111111, [0, 0.15, 0.15], head, { shadow: false })

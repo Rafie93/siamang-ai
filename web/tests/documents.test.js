@@ -17,7 +17,8 @@ it('never invents a result for a catalog entry the backend did not record', () =
   expect(by('planner').generated).toBe(1)
   expect(by('qa').documents[0]).toMatchObject({ status: 'pending', content: '' })
   expect(by('qa').generated).toBe(0)
-  expect(groups).toHaveLength(6)
+  expect(groups).toHaveLength(7)
+  expect(by('designer')).toMatchObject({ name: 'Desainer', documents: [] }) // this catalog fixture has none
 })
 it('maps office characters to document owners', () => {
   expect(documentAgentFor('amang')).toBe('lead')

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { AGENTS } from '@/domain/team.js'
 const props = defineProps({
   team: Object,
   motion: Boolean,
@@ -73,7 +74,7 @@ function resetView() {
       <p>WebGL tidak tersedia. Semua fungsi task tetap dapat digunakan.</p>
     </div>
     <div class="scene-top">
-      <span class="pill">SIAMANG OFFICE · 6 AGEN</span>
+      <span class="pill">SIAMANG OFFICE · {{ AGENTS.length }} AGEN</span>
       <span class="pill" :class="{ warn: team?.simulated }">{{
         team?.simulated ? 'MODE DEMO' : 'LIVE · BACKEND'
       }}</span>

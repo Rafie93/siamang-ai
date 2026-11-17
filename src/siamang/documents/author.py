@@ -28,8 +28,8 @@ PRIOR_CLIP = 4_000  # characters of each earlier document a later call is shown
 TRACKED_LIMIT = 400  # file names of the repository a design call is shown
 DESIGN_BUDGET_BYTES = 4_500  # the Loop refuses input above 8 KiB; the project spec takes the rest
 SPEC_BUDGET_BYTES = 2_000
-DESIGN_PRIORITY = ('acceptance_criteria', 'task_specification', 'technical_design', 'prd', 'api_spec', 'erd',
-                   'class_diagram', 'sequence_diagram', 'use_case_diagram', 'srs')
+DESIGN_PRIORITY = ('acceptance_criteria', 'task_specification', 'technical_design', 'ui_spec', 'prd', 'api_spec',
+                   'design_tokens', 'erd', 'class_diagram', 'sequence_diagram', 'user_flow', 'use_case_diagram', 'srs')
 OWNER_PRECEDENCE = 'Entries with owner_edited are diagrams the project owner changed by hand: where anything else disagrees, follow them.'
 
 SKILLS: Mapping[str, str] = {
@@ -38,6 +38,17 @@ SKILLS: Mapping[str, str] = {
                'scope, non-goals, and requirements; acceptance criteria must be objectively checkable.',
     'analyst': 'You are the System Analyst. Design the technical solution before any code is written. Base it on the '
                'observed project facts in the context, and name what is unknown instead of guessing.',
+    'designer': 'You are the UI/UX Designer. Design what the user sees and does before any code is written, from the '
+                'PRD, the architecture, and the API in prior_documents. When the repository already has an interface, '
+                'follow its framework, components, and look instead of inventing a new style. user_flow is a Mermaid '
+                'flowchart of the main journeys, including empty, error, and cancel paths. sitemap is a Mermaid graph '
+                'of the screens with their routes. design_tokens is one json code fence of the form '
+                '{"colors": {"name": "#rrggbb"}, "typography": {}, "spacing": {}, "radius": {}}, where colors include '
+                'text and background. ui_spec describes each screen: purpose, components, the empty, loading, error, '
+                'and success states, and behaviour on a phone and a desktop; it starts with a Markdown table with '
+                'the columns Layar, Route, and File naming the file of the repository that holds each screen, new or '
+                'existing. accessibility covers contrast, keyboard use, focus, and labels. When the work has no user '
+                'interface, such as a library, a CLI, or a backend change, set applicable to false.',
     'programmer': 'You are the Programmer. Document the implementation that the supplied patch actually contains.',
     'qa': 'You are QA. Plan how the supplied change should be tested. You have not run anything: describe tests '
           'to run, and never report a result.',

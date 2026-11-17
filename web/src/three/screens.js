@@ -7,6 +7,7 @@ const palettes = {
   amang: '#9fd6b6',
   planner: '#f2c27b',
   analyst: '#8ec5f0',
+  designer: '#f2a6d4',
   programmer: '#c7b2ff',
   qa: '#8fe0a8',
   reviewer: '#f2a19d',
@@ -110,6 +111,22 @@ export function createScreen(role) {
       ctx.fillStyle = accent
       const k = step % nodes.length
       ctx.fillRect(nodes[k][0] - 22, nodes[k][1] - 12, 44, 24)
+    } else if (role === 'designer') {
+      // A wireframe taking shape: frame, header, cards, and a swatch row that cycles.
+      ctx.strokeStyle = accent
+      ctx.lineWidth = 2
+      ctx.strokeRect(14, 24, 150, 124)
+      ctx.fillStyle = '#3b524b'
+      ctx.fillRect(20, 30, 138, 16)
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = i <= step % 5 ? accent : '#2c4a3f'
+        ctx.fillRect(20 + (i % 2) * 70, 54 + Math.floor(i / 2) * 44, 64, 38)
+      }
+      const swatches = ['#f2a6d4', '#8ec5f0', '#f2c27b', '#8fe0a8', '#d9e8e1']
+      for (let i = 0; i < swatches.length; i++) {
+        ctx.fillStyle = swatches[(i + step) % swatches.length]
+        ctx.fillRect(180, 28 + i * 24, 60, 18)
+      }
     } else if (role === 'planner') {
       for (let i = 0; i < 6; i++) {
         ctx.fillStyle = i <= step % 7 ? accent : '#3b524b'
@@ -193,6 +210,7 @@ export function createPipelineBoard() {
   const steps = [
     ['planner', 'PLAN', t => t.activeAgent === 'planner'],
     ['analyst', 'ARSITEK', t => t.activeAgent === 'analyst'],
+    ['designer', 'DESAIN', t => t.activeAgent === 'designer'],
     ['programmer', 'CODE', t => t.activeAgent === 'programmer'],
     ['qa', 'QA', t => t.activeAgent === 'qa' && t.phase !== 'verifying'],
     ['reviewer', 'REVIEW', t => t.activeAgent === 'reviewer'],
@@ -232,7 +250,7 @@ export function createPipelineBoard() {
       ctx.fillText(recovering ? 'PEMULIHAN' : 'PERCOBAAN KE-' + team.iteration, 536, 52)
     }
     steps.forEach(([id, label, isActive], i) => {
-      const x = 32 + i * 140,
+      const x = 32 + i * 120,
         s =
           id === 'sandbox'
             ? sandboxStatus(team)
@@ -249,15 +267,15 @@ export function createPipelineBoard() {
             : s === 'blocked'
               ? '#a36b1f'
               : '#1d332d'
-      ctx.fillRect(x, 120, 126, 96)
+      ctx.fillRect(x, 120, 110, 96)
       if (active) {
         ctx.strokeStyle = '#b6ffd3'
         ctx.lineWidth = 4
-        ctx.strokeRect(x + 2, 122, 122, 92)
+        ctx.strokeRect(x + 2, 122, 106, 92)
       }
       ctx.fillStyle = '#e9f3ee'
       ctx.font = 'bold 21px sans-serif'
-      ctx.fillText(label, x + 10, 160)
+      ctx.fillText(label, x + 8, 160, 94)
       ctx.font = '18px sans-serif'
       ctx.fillStyle = '#b8cbc4'
       ctx.fillText(
@@ -277,7 +295,7 @@ export function createPipelineBoard() {
       )
       if (i < steps.length - 1) {
         ctx.fillStyle = '#4f6b62'
-        ctx.fillRect(x + 126, 166, 14, 4)
+        ctx.fillRect(x + 110, 166, 10, 4)
       }
     })
     if (team.outcome) {

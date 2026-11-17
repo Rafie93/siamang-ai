@@ -100,7 +100,7 @@ SYSTEM_NOTES = ('From analysis:', 'Not shown to the model:')  # added by the Pro
 # Every way a run can stop short of an approval takes an answer from the owner, and that answer resumes it.
 ANSWERABLE = ('clarification_required', 'quality_gate', 'input_required', 'worker_interrupted')
 MAX_BLOCKERS = 8
-DESIGN_STAGES = ('briefing', 'planning', 'analysis')
+DESIGN_STAGES = ('briefing', 'planning', 'analysis', 'designing')
 CI_POLL_SECS = 20
 CI_NO_WORKFLOW_SECS = 120  # no run for this commit by then: the repository has no workflow for it
 CI_TIMEOUT_SECS = 60 * 60
@@ -598,7 +598,7 @@ class Runtime:
                     task = engine.start(task_id)
                     # With a design gate the first visible work is the Lead's brief; the template plan is only input.
                     repair = ci_repair.info(task)  # a failed build is the brief: the approved design still stands
-                    gated = mode == 'start' and not repair and bool(self.author('planner') or self.author('analyst'))
+                    gated = mode == 'start' and not repair and any(self.author(a) for a in ('planner', 'analyst', 'designer'))
                     store.update(run_id, state='running',
                                  phase='programming' if mode == 'code' else 'briefing' if gated else 'planning')
                 pulse.start()

@@ -34,7 +34,7 @@ flowchart TD
     GW[Git Workspace]
     TR[Tool Registry]
     MR[Model Router]
-    AG[Planner, Analyst, Programmer, QA, Reviewer, Loop]
+    AG[Planner, Analyst, Designer, Programmer, QA, Reviewer, Loop]
     AP[Approval]
   end
   RT --> GH[GitHub lewat gh: branch, PR, CI]
@@ -46,9 +46,9 @@ flowchart TD
 
 1. **Masuk:** task dibuat lewat API atau CLI. Pengiriman tidak langsung menjalankan.
 2. **Brief:** Lead bertanya bila perlu, lalu menulis brief.
-3. **Desain:** Planner dan Analyst menulis dokumen, per bagian dan paralel. Hanya bagian
-   yang gagal diulang, dan retry memakai ulang yang sudah jadi. Jika salah satunya punya
-   model, run berhenti di `design_approval`.
+3. **Desain:** Planner, Analyst, lalu Designer (UI/UX) menulis dokumen, per bagian dan paralel.
+   Hanya bagian yang gagal diulang, dan retry memakai ulang yang sudah jadi. Jika salah satunya
+   punya model, run berhenti di `design_approval`.
 4. **Kode:** Analyst boleh membagi pekerjaan menjadi paket per gelombang. Tiap paket
    melewati Loop (Programmer, QA, Reviewer) di salinan repo sendiri, paralel dalam satu
    gelombang. Gelombang berikutnya melihat hasil sebelumnya. Semua paket lalu digabung

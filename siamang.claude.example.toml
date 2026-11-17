@@ -24,6 +24,9 @@ model = "claude-sonnet"
 [agents.analyst]
 model = "claude-sonnet"
 
+[agents.designer]
+model = "claude-sonnet"
+
 [agents.programmer]
 model = "claude-sonnet"
 

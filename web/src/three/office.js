@@ -24,7 +24,7 @@ export function createOffice(
   container.appendChild(renderer.domElement)
   renderer.domElement.setAttribute(
     'aria-label',
-    'Kantor virtual 3D: enam agen SIAMANG. Status tiap agen juga tersedia sebagai daftar teks.',
+    'Kantor virtual 3D: tujuh agen SIAMANG. Status tiap agen juga tersedia sebagai daftar teks.',
   )
   renderer.domElement.setAttribute('role', 'img')
   const controls = new OrbitControls(camera, renderer.domElement)

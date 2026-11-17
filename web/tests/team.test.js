@@ -27,11 +27,37 @@ const running = (phase, heartbeatAgo = 1000) => ({
 })
 
 describe('team roster', () => {
-  it('has the lead plus the five SIAMANG roles, each owning a backend phase', () => {
-    expect(AGENTS.map(a => a.id)).toEqual(['amang', 'planner', 'analyst', 'programmer', 'qa', 'reviewer'])
-    for (const p of ['planning', 'analysis', 'programming', 'qa', 'reviewing'])
+  it('has the lead plus the six SIAMANG roles, each owning a backend phase', () => {
+    expect(AGENTS.map(a => a.id)).toEqual([
+      'amang',
+      'planner',
+      'analyst',
+      'designer',
+      'programmer',
+      'qa',
+      'reviewer',
+    ])
+    for (const p of ['planning', 'analysis', 'designing', 'programming', 'qa', 'reviewing'])
       expect(agentForPhase(p)).not.toBe('amang')
     expect(agentForPhase('unknown_phase')).toBeNull()
+  })
+})
+
+describe('designer handoffs', () => {
+  it('the architecture goes to the Desainer, whose design goes to Amang for the gate', () => {
+    const list = transitions([
+      ev(1, 'planning'),
+      ev(2, 'analysis'),
+      ev(3, 'designing'),
+      ev(4, 'design_approval'),
+    ])
+    expect(list.map(x => [x.from, x.to])).toEqual([
+      ['planner', 'analyst'],
+      ['analyst', 'designer'],
+      ['designer', 'amang'],
+    ])
+    expect(list[1].say).toMatch(/desain UI\/UX/)
+    expect(list[2].say).toMatch(/ditinjau/)
   })
 })
 
@@ -152,7 +178,15 @@ describe('demo mode', () => {
       const s = teamState({ ...d, simulated: true })
       if (s.activeAgent) seen.add(s.activeAgent)
     }
-    expect([...seen].sort()).toEqual(['amang', 'analyst', 'planner', 'programmer', 'qa', 'reviewer']) // Amang is active while he recovers a failed run
+    expect([...seen].sort()).toEqual([
+      'amang',
+      'analyst',
+      'designer',
+      'planner',
+      'programmer',
+      'qa',
+      'reviewer',
+    ]) // Amang is active while he recovers a failed run
     const approval = DEMO_SCRIPT.find(s => s.phase === 'awaiting_approval').at
     expect(teamState(demoSnapshot(approval + 1)).approval).toBe(true)
     expect(demoSnapshot(DEMO_CYCLE - 1).task.status).toBe('completed')

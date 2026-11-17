@@ -4,6 +4,7 @@ export const DEMO_SCRIPT = [
   { at: 0, phase: 'queued', state: 'scheduled' },
   { at: 4, phase: 'planning', state: 'running' },
   { at: 14, phase: 'analysis', state: 'running' },
+  { at: 19, phase: 'designing', state: 'running' },
   { at: 24, phase: 'programming', state: 'running', iteration: 1 },
   { at: 36, phase: 'qa', state: 'running', iteration: 1 },
   { at: 45, phase: 'reviewing', state: 'running', iteration: 1 },

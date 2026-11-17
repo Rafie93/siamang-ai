@@ -242,7 +242,7 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
                 'documents': [dict(agent=s.agent, stage=s.stage, kind=s.kind, title=s.title, source=str(s.source))
                               for s in CATALOG],
                 'task_statuses': [s.value for s in TaskStatus],
-                'execution_phases': ['queued', 'clarification', 'briefing', 'planning', 'analysis', 'design_approval', 'programming',
+                'execution_phases': ['queued', 'clarification', 'briefing', 'planning', 'analysis', 'designing', 'design_approval', 'programming',
                                      'qa', 'verifying', 'recovering', 'deciding', 'reviewing', 'reporting', 'awaiting_approval', 'blocked', 'interrupted', 'finished', 'failed', 'cancelled']}
 
     # Plain def: asking Ollama for its tags must not hold up the event loop.

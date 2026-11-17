@@ -81,8 +81,8 @@ Agen coding sering melaporkan "semua test lulus". Di Siamang, model tidak bisa m
 ```mermaid
 flowchart LR
   T[Instruksi] --> L[Amang / Lead]
-  L --> P[Planner] --> A[Arsitek]
-  A --> G1{Persetujuan desain}
+  L --> P[Planner] --> A[Arsitek] --> D[Desainer UI/UX]
+  D --> G1{Persetujuan desain}
   G1 --> C[Programmer]
   C --> Q[QA statis] --> R[Reviewer]
   R -->|ditahan| C
@@ -165,7 +165,7 @@ Untuk melihat-lihat tanpa model atau repo, pilih **▶ Mode demo** di halaman **
 
 | Area | Fungsi |
 |---|---|
-| **Kantor 3D** | Enam agen, masing-masing dengan meja dan monitor animasi. Orbit, zoom, ikuti aktivitas, atau klik agen untuk melihat kerjanya. |
+| **Kantor 3D** | Tujuh agen, masing-masing dengan meja dan monitor animasi. Orbit, zoom, ikuti aktivitas, atau klik agen untuk melihat kerjanya. |
 | **Serah-terima** | Setiap perubahan fase yang tercatat dimainkan sebagai serah-terima antar-agen. Agen hanya tampil bekerja bila backend melaporkan aktivitas segar, tidak pernah saat offline atau stale. |
 | **Command dua arah** | Amang memastikan instruksi Anda sebelum task dibuat, dan task yang berhenti menjelaskan alasannya serta bisa dilanjutkan dengan jawaban Anda. |
 | **Dokumen** | Hasil kerja tiap agen beserta asalnya: tulisan model, dihitung sistem, atau hasil ukur. |
@@ -240,7 +240,7 @@ Sebuah task lalu melewati panggilan berikut:
 |---|---|---|
 | 1 | Amang membaca repo dan bertanya; jawab lalu setujui spesifikasinya | `POST /projects/{id}/intake/messages`, `POST /projects/{id}/intake/approve` |
 | 2 | Sampaikan pekerjaan; Amang menyusun brief, lalu Anda mengonfirmasinya | `POST /projects/{id}/drafts`, `POST /projects/{id}/drafts/{draft}/confirm` |
-| 3 | Planner dan Arsitek menulis dokumen desain; run berhenti di gerbang pertama | `GET /tasks/{id}/documents`, `POST /tasks/{id}/design-decision` |
+| 3 | Planner, Arsitek, dan Desainer menulis dokumen desain; run berhenti di gerbang pertama | `GET /tasks/{id}/documents`, `POST /tasks/{id}/design-decision` |
 | 4 | Programmer, QA, dan Reviewer bekerja dalam loop terbatas; run berhenti di gerbang kedua | `GET /tasks/{id}/reports`, `GET /approvals?project_id={id}` |
 | 5 | Setelah Anda setuju, Siamang menghitung ulang bukti, membuat commit dan PR | `POST /approvals/{run_id}` |
 | 6 | Siamang mengikuti CI; yang gagal kembali ke Programmer, dengan batas | `GET /tasks/{id}` (`task.ci`) |
@@ -272,7 +272,7 @@ Belum ditandai sebagai rilis GitHub. Rinciannya ada di [changelog](./CHANGELOG.m
 
 | Kemampuan | Status | Catatan |
 |---|---|---|
-| Lead, Planner, Arsitek, Programmer, QA, Reviewer | Tersedia | Alur tahap ditentukan kode |
+| Lead, Planner, Arsitek, Desainer, Programmer, QA, Reviewer | Tersedia | Alur tahap ditentukan kode |
 | Branch `siamang/*`, PR, dan pembacaan CI GitHub | Tersedia | Tanpa force push; tanpa merge kecuali level otonomi 3 |
 | Perbaikan otomatis saat CI gagal | Tersedia | Hanya pada PR yang sudah disetujui dan masih terbuka; `ci_repair = 0` untuk mematikan |
 | Paket kerja paralel | Tersedia | Sejauh ini baru diuji dengan model tiruan |

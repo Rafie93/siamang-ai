@@ -81,8 +81,8 @@ Coding agents often report "all tests pass". In Siamang, a model cannot make tha
 ```mermaid
 flowchart LR
   T[Instruction] --> L[Amang / Lead]
-  L --> P[Planner] --> A[Architect]
-  A --> G1{Design approval}
+  L --> P[Planner] --> A[Architect] --> D[UI/UX Designer]
+  D --> G1{Design approval}
   G1 --> C[Programmer]
   C --> Q[Static QA] --> R[Reviewer]
   R -->|held| C
@@ -167,7 +167,7 @@ To look around without a model or a repository, choose **▶ Mode demo** on the 
 
 | Area | What it does |
 |---|---|
-| **3D office** | Six agents, each with a desk and an animated monitor. Orbit, zoom, follow the activity, or click an agent to see its work. |
+| **3D office** | Seven agents, each with a desk and an animated monitor. Orbit, zoom, follow the activity, or click an agent to see its work. |
 | **Handoffs** | Each recorded phase change plays as a handoff between agents. An agent is shown working only when the backend reports fresh activity, never when offline or stale. |
 | **Two-way command** | Amang checks your instruction before a task exists, and a stopped task explains why and can continue with your answer. |
 | **Documents** | Each agent's output with its origin: written by a model, computed by the system, or measured. |
@@ -242,7 +242,7 @@ A task then moves through these calls:
 |---|---|---|
 | 1 | Amang reads the repository and asks; answer, then approve the specification | `POST /projects/{id}/intake/messages`, `POST /projects/{id}/intake/approve` |
 | 2 | Describe the work; Amang writes a brief and you confirm it | `POST /projects/{id}/drafts`, `POST /projects/{id}/drafts/{draft}/confirm` |
-| 3 | Planner and Architect write design documents; the run stops at the first gate | `GET /tasks/{id}/documents`, `POST /tasks/{id}/design-decision` |
+| 3 | Planner, Architect, and Designer write design documents; the run stops at the first gate | `GET /tasks/{id}/documents`, `POST /tasks/{id}/design-decision` |
 | 4 | Programmer, QA and Reviewer work in a bounded loop; the run stops at the second gate | `GET /tasks/{id}/reports`, `GET /approvals?project_id={id}` |
 | 5 | Once you agree, Siamang recomputes the evidence and creates the commit and PR | `POST /approvals/{run_id}` |
 | 6 | Siamang follows CI; a failure returns to the Programmer, within limits | `GET /tasks/{id}` (`task.ci`) |
@@ -274,7 +274,7 @@ Not tagged as a GitHub release yet. Details are in the [changelog](./CHANGELOG.m
 
 | Capability | Status | Notes |
 |---|---|---|
-| Lead, Planner, Architect, Programmer, QA, Reviewer | Available | Stage order is decided by code |
+| Lead, Planner, Architect, Designer, Programmer, QA, Reviewer | Available | Stage order is decided by code |
 | `siamang/*` branches, PRs and reading GitHub CI | Available | No force push; no merge except at autonomy level 3 |
 | Automatic repair when CI fails | Available | Only on an approved, open PR; `ci_repair = 0` turns it off |
 | Parallel work packages | Available | So far tested only with a fake model |

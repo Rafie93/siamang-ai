@@ -3,18 +3,26 @@
 export const AISLE_Z = -1
 const back = -4.15,
   front = 2.25
-const desk = (x, z, face, deskZ) => ({ seat: [x, z], face, desk: [x, deskZ], lane: [x + 1.15, z] })
+// The lane is the desk's way to the aisle: on its right, or on its left where furniture blocks the right.
+const desk = (x, z, face, deskZ, side = 1) => ({
+  seat: [x, z],
+  face,
+  desk: [x, deskZ],
+  lane: [x + side * 1.15, z],
+})
 export const DESKS = {
   planner: desk(-3.5, back, 0, -3.35),
   analyst: desk(0, back, 0, -3.35),
   programmer: desk(-3.5, front, Math.PI, 1.45),
   qa: desk(0, front, Math.PI, 1.45),
   reviewer: desk(3.5, front, Math.PI, 1.45),
+  designer: desk(3.5, back, 0, -3.35, -1), // the lounge table blocks the right
   amang: { seat: [-8, 1], face: Math.PI / 2, desk: [-7.15, 1], lane: [-7.9, -0.05] },
 }
-// Furniture footprints [minX,minZ,maxX,maxZ] for collision tests and layout.
+export const WORK_DESKS = ['planner', 'analyst', 'programmer', 'qa', 'reviewer', 'designer']
+// Furniture footprints [minX,minZ,maxX,maxZ] for collision tests and layout; desks first, in WORK_DESKS order.
 export const OBSTACLES = [
-  ...['planner', 'analyst', 'programmer', 'qa', 'reviewer'].map(id => {
+  ...WORK_DESKS.map(id => {
     const [x, z] = DESKS[id].desk
     return [x - 0.85, z - 0.42, x + 0.85, z + 0.42]
   }),
@@ -26,7 +34,7 @@ export const OBSTACLES = [
 ]
 export const SPOTS = {
   coffee: { pos: [7.2, -5.05], face: Math.PI, lane: [7.2, -4.4] },
-  whiteboard: { pos: [2.9, -5.6], face: Math.PI, lane: [2.9, -4.4] },
+  whiteboard: { pos: [2.2, -5.6], face: Math.PI, lane: [2.2, -4.4] }, // left of centre, clear of the Desainer's desk
   window: { pos: [-6, -5.6], face: Math.PI, lane: [-6, -4.4] },
   approval: { pos: [-8.2, -2.2], face: -Math.PI * 0.75, lane: [-7.9, -1.6] },
 }
@@ -35,7 +43,8 @@ export function visitSpot(id) {
   const d = DESKS[id]
   if (!d) return null
   if (id === 'amang') return { pos: [-7.9, -0.05], face: 0, lane: [-7.9, -0.05] }
-  return { pos: [d.lane[0], d.seat[1] + (d.face === 0 ? 0.15 : -0.15)], face: -Math.PI / 2, lane: d.lane }
+  const face = d.lane[0] > d.seat[0] ? -Math.PI / 2 : Math.PI / 2 // toward the seat
+  return { pos: [d.lane[0], d.seat[1] + (d.face === 0 ? 0.15 : -0.15)], face, lane: d.lane }
 }
 export function seatSpot(id) {
   const d = DESKS[id]

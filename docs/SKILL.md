@@ -1,11 +1,11 @@
 ---
 name: siamang
-description: Operate and maintain Siamang, a local Evidence-Based Autonomous Software Engineering system with Lead, Planner, Architect, Programmer, QA, and Reviewer agents. Use this skill whenever the task involves submitting or running a Siamang task, answering its questions, approving a design or proposal, reading agent documents, configuring agent models in siamang.toml, debugging a stuck run (worker_busy, quality_gate, design_approval), or changing Siamang's code or docs, even if the user only says "the agents" or "the office".
+description: Operate and maintain Siamang, a local Evidence-Based Autonomous Software Engineering system with Lead, Planner, Architect, Designer, Programmer, QA, and Reviewer agents. Use this skill whenever the task involves submitting or running a Siamang task, answering its questions, approving a design or proposal, reading agent documents, configuring agent models in siamang.toml, debugging a stuck run (worker_busy, quality_gate, design_approval), or changing Siamang's code or docs, even if the user only says "the agents" or "the office".
 ---
 
 # Siamang
 
-Siamang turns an instruction into a pull request through six agents and two human
+Siamang turns an instruction into a pull request through seven agents and two human
 gates. Read `docs/VISION.md` for the direction and `docs/HTTP_API.md` for full
 route details. This guide covers what those documents do not make obvious.
 
@@ -88,9 +88,9 @@ To say what ran at the same time, read `design_parts` in the task snapshot and c
 
 Set each agent's model in `siamang.toml` and restart the server, or use `POST /v0/settings/models` with the `configure` permission.
 
-- Agents: `lead`, `planner`, `analyst`, `programmer`, `qa`, `reviewer`.
+- Agents: `lead`, `planner`, `analyst`, `designer`, `programmer`, `qa`, `reviewer`.
 - Providers: `claude_cli`, `ollama`, `echo`. The HTTP API refuses `echo`.
-- If `planner` or `analyst` has a model, runs stop at `design_approval`.
+- If `planner`, `analyst`, or `designer` has a model, runs stop at `design_approval`.
 - Higher `parallel` values use subscription limits faster.
 - A model call gets the smallest of its stage's limit, the provider's `timeout_secs`
   (120 when unset), and 600 seconds. Below 600, design retries get no extra time.

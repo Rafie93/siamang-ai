@@ -54,6 +54,10 @@ CATALOG: tuple[Spec, ...] = (
             ('erd', 'ERD / Database Schema'), ('sequence_diagram', 'Sequence Diagram'),
             ('api_spec', 'API Specification'), ('technical_design', 'Technical Design Document')),
     *_specs('analyst', 'analysis', Source.DERIVED, ('work_packages', 'Paket Kerja Programmer')),
+    *_specs('designer', 'designing', Source.AUTHORED,
+            ('user_flow', 'User Flow / Journey'), ('sitemap', 'Sitemap dan Navigasi'),
+            ('design_tokens', 'Design System / Tokens'), ('ui_spec', 'Spesifikasi Layar dan Komponen'),
+            ('accessibility', 'Aksesibilitas')),
     *_specs('programmer', 'programming', Source.DERIVED,
             ('source_code', 'Source Code'), ('file_structure', 'File dan Folder Project'),
             ('migration', 'Database Migration'), ('unit_tests', 'Unit Test Awal'), ('patch', 'Code Patch / Diff')),
@@ -75,7 +79,7 @@ CATALOG: tuple[Spec, ...] = (
             ('status_report', 'Status dan Progres Proyek'), ('final_report', 'Final Project Report'),
             ('recommendations', 'Rekomendasi Tindak Lanjut')),
 )
-AGENTS = ('lead', 'planner', 'analyst', 'programmer', 'qa', 'reviewer')
+AGENTS = ('lead', 'planner', 'analyst', 'designer', 'programmer', 'qa', 'reviewer')
 SPECS = {spec.kind: spec for spec in CATALOG}
 
 

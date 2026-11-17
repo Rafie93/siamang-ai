@@ -99,6 +99,7 @@ function doingNow(phase, iteration, writing) {
     reporting: 'Menyusun laporan akhir dan rekomendasi',
     planning: 'Menyusun PRD, roadmap, dan rincian kerja',
     analysis: 'Merancang solusi teknis',
+    designing: 'Merancang alur, layar, dan design system',
     programming: `Menulis patch${round}`,
     qa: `Memeriksa patch secara statis${round}`,
     verifying: `Menjalankan test dan build di sandbox${round}`,
@@ -233,7 +234,7 @@ export function agentDetail(
   const last = working ? history.at(-1) : null
   // Only a stage that writes documents names them: during the Loop the agent is on the patch itself.
   const pending =
-    writing || ['briefing', 'planning', 'analysis', 'reporting'].includes(working ? phase : '')
+    writing || ['briefing', 'planning', 'analysis', 'designing', 'reporting'].includes(working ? phase : '')
       ? docs
           .filter(
             d =>

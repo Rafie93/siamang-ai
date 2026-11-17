@@ -34,7 +34,7 @@ CONFIG_ENV = "SIAMANG_CONFIG"
 
 ENVIRONMENTS = ("development", "test", "production")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
-MODEL_AGENTS = ("lead", "planner", "analyst", "programmer", "qa", "reviewer")
+MODEL_AGENTS = ("lead", "planner", "analyst", "designer", "programmer", "qa", "reviewer")
 
 
 class ConfigError(ValueError):

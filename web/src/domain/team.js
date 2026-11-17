@@ -1,4 +1,4 @@
-// Maps backend task + execution events onto the six office agents.
+// Maps backend task + execution events onto the seven office agents.
 // Truthfulness rules (PRD §1): an agent is only "working" when the backend reports a fresh,
 // known activity for its phase. Handoffs are derived only from persisted execution events.
 import { visualStatus } from './status.js'
@@ -7,6 +7,7 @@ export const AGENTS = [
   { id: 'amang', name: 'Amang', role: 'Lead Agent', phase: null, color: '#2f3b33' },
   { id: 'planner', name: 'Planner', role: 'Perencana', phase: 'planning', color: '#d08a3c' },
   { id: 'analyst', name: 'Arsitek', role: 'System Analyst', phase: 'analysis', color: '#3d7fb8' },
+  { id: 'designer', name: 'Desainer', role: 'UI/UX Designer', phase: 'designing', color: '#c25b9e' },
   { id: 'programmer', name: 'Programmer', role: 'Coding', phase: 'programming', color: '#7b5bc4' },
   { id: 'qa', name: 'QA', role: 'Quality Assurance', phase: 'qa', color: '#3f9a63' },
   { id: 'reviewer', name: 'Reviewer', role: 'Code Review', phase: 'reviewing', color: '#c4534f' },
@@ -19,6 +20,7 @@ const byPhase = {
   reporting: 'amang',
   planning: 'planner',
   analysis: 'analyst',
+  designing: 'designer',
   programming: 'programmer',
   qa: 'qa',
   verifying: 'qa',
@@ -34,6 +36,8 @@ export const agentName = id => AGENTS.find(a => a.id === id)?.name || id
 const messages = {
   'amang>planner': ['Brief task diteruskan ke Planner', 'Siap, saya susun rencana.'],
   'planner>analyst': ['Rencana kerja diserahkan ke Arsitek', 'Saya analisis strukturnya.'],
+  'analyst>designer': ['Arsitektur siap, giliran desain UI/UX', 'Saya rancang alur dan tampilannya.'],
+  'designer>amang': ['Desain UI/UX selesai untuk ditinjau', 'Terima kasih, saya ajukan ke operator.'],
   'analyst>programmer': ['Analisis & desain siap untuk Programmer', 'Oke, saya susun patch.'],
   'programmer>qa': ['Proposal patch dikirim ke QA', 'Saya periksa kualitasnya.'],
   'qa>reviewer': ['Hasil QA diteruskan ke Reviewer', 'Saya review proposalnya.'],

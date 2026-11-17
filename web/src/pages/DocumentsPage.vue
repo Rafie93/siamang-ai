@@ -23,7 +23,7 @@ const tabs = computed(() =>
   })),
 )
 
-const DESIGN_STAGES = ['briefing', 'planning', 'analysis']
+const DESIGN_STAGES = ['briefing', 'planning', 'analysis', 'designing']
 const editing = ref(null)
 const canEdit = d =>
   office.editMode && office.can('approve') && d.status === 'generated' && DESIGN_STAGES.includes(d.stage)

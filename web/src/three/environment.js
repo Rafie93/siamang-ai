@@ -87,6 +87,9 @@ export function buildOffice(scene, kit) {
         box([0.05, 0.012, 0.05], [0xffd166, 0xef476f, 0x06d6a0][i], [-0.4 + i * 0.08, 0.78, 0.15], g)
     }
     if (agent.id === 'analyst') cyl(0.04, 0.6, 0x8ec5f0, [0.5, 0.8, -0.1], g).rotation.z = Math.PI / 2
+    if (agent.id === 'designer')
+      for (let i = 0; i < 4; i++)
+        box([0.07, 0.012, 0.07], [0xc25b9e, 0x3d7fb8, 0xf2c27b, 0x3f9a63][i], [0.4 + i * 0.09, 0.78, 0.05], g)
     if (agent.id === 'qa') box([0.12, 0.18, 0.12], 0x3f9a63, [0.55, 0.86, 0.1], g)
     if (agent.id === 'reviewer')
       for (let i = 0; i < 3; i++) box([0.24, 0.03, 0.32], 0xf1ece0, [0.5, 0.78 + i * 0.03, 0], g)

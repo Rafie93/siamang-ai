@@ -10,7 +10,7 @@ Browser → gateway lokal (`scripts/local.mjs`, session + CSRF, token acak di se
 |---|---|---|
 | Adapter | `src/services/api.js`, `contract.js` | fetch + timeout, CSRF, validasi bentuk respons |
 | Domain | `src/domain/status.js` | label status task yang jujur (heartbeat ≤15 dtk) |
-| Domain | `src/domain/team.js` | roster 6 agen, peta fase→agen, `teamState()` dan `transitions()` dari execution-events |
+| Domain | `src/domain/team.js` | roster 7 agen, peta fase→agen, `teamState()` dan `transitions()` dari execution-events |
 | Domain | `src/domain/demo.js` | timeline simulasi berlabel `simulated:true` |
 | Domain | `src/domain/documents.js` | gabungan katalog dokumen backend dengan yang tercatat; entri tanpa catatan tampil "belum sampai tahap ini" |
 | 3D | `src/three/office.js` | renderer, kamera, cahaya, loop, overlay label/balon, picking, follow, lifecycle/dispose |

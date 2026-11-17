@@ -98,6 +98,7 @@ Status per 4 November 2026, berdasarkan pembacaan kode dan dokumentasi.
 | Amang (Lead/Orchestrator) | Sebagian | Bertanya, menyusun brief, dan melapor; bila dinyalakan, menjawab dengan kutipan dari keputusan pemilik dan mengembalikan pekerjaan yang ditahan ([AUTONOMY.md](AUTONOMY.md)) | Diuji dengan model nyata; alur tahap masih ditentukan kode | 30 |
 | Planner | Sudah | PRD, roadmap, WBS, dan rencana | Perencanaan ulang saat berjalan | 28 |
 | Architect | Sudah | SRS, arsitektur, diagram, `work_packages` per gelombang dengan kontrak bersama; dokumen ditulis per bagian secara paralel | Graf dependensi antar-paket; dokumen satu tahap belum saling membaca | 28, 32 |
+| Designer (UI/UX) | Sebagian | Alur pengguna, sitemap, token, spesifikasi layar, dan aksesibilitas sebelum kode ([DESIGNER.md](DESIGNER.md)) | Wireframe HTML, edit token, restart paket yang terdampak saja | — |
 | Programmer | Sudah | Patch, paralel per paket dalam satu gelombang; paket yang timeout dicoba lagi lalu dibelah dua; bisa memakai tool di sandbox bila dinyalakan | Pembelahan menurut isi kode, bukan hanya path | 27 |
 | QA | Sebagian | Pemeriksaan statis, rencana test | Menjalankan test | 26 |
 | Reviewer | Sudah | Pemeriksaan deterministik dan independen; ulasan model bersifat saran | Temuan model masuk loop revisi | 26 |
@@ -109,6 +110,22 @@ Status per 4 November 2026, berdasarkan pembacaan kode dan dokumentasi.
 | Verification Engine | Sebagian | QA statis, Reviewer, loop, bukti persetujuan, hasil CI GitHub, test/build di sandbox yang menentukan lulus | Pencocokan tiap acceptance criteria dengan sebuah check | 26 |
 | Recovery Engine | Sebagian | Tiga tingkat (ulang dengan umpan balik, penasihat, susun ulang rencana), checkpoint penyelesaian delivery, kompromi masuk utang teknis di PR (`[recovery]`); run terputus, paket perbaikan, CI gagal kembali ke Programmer; tahap desain mengulang hanya bagian yang gagal, dan retry memakai ulang dokumen yang sudah jadi | Rollback; percobaan ulang desain baru menambah waktu, belum mengganti pendekatan; tiga tingkat belum berlaku untuk run paket paralel | 28 |
 | Permission Manager | Sudah | Deny by default, izin per identitas, persetujuan dengan bukti asal-usul, gerbang berbasis risiko bila dinyalakan | Level per proyek, login multi-user | 33 |
+
+## Desainer UI/UX
+
+Arah yang disepakati pemilik (17 November 2026):
+
+1. **Wireframe HTML statis.** Dokumen `wireframes` berisi satu blok `html` per layar, dirender di iframe
+   `sandbox` tanpa script, dengan warna dan font dari `design_tokens` sebagai variabel CSS. Owner bisa
+   mengedit kode wireframe dan token dengan pratinjau langsung, seperti diagram hari ini.
+2. **Edit blok, bukan hanya diagram.** Editor dan riwayat revisi mengenali blok `mermaid`, `html`, dan `json`.
+3. **Restart selektif.** Perubahan desain yang dikirim mengulang hanya paket kerja yang path-nya beririsan
+   dengan layar yang berubah (dari tabel `Layar | Route | File` di `ui_spec`) beserta gelombang sesudahnya.
+   Ditentukan oleh kode, bukan model. Paket lain menyimpan patch-nya.
+4. **Input per paket.** Programmer menerima token utuh, ditambah wireframe dan spesifikasi hanya untuk layar
+   miliknya, supaya muat di batas input Loop.
+5. **Bukti, bukan klaim.** `contrast_check` (dihitung kode dari token) dan `design_compliance` dari Reviewer
+   (saran). Kecocokan visual tetap `not_run` sampai ada browser di sandbox.
 
 ## Aturan lama yang akan berubah
 

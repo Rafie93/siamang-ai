@@ -16,6 +16,7 @@ export function visualStatus(task, connected = true, now = Date.now()) {
       reporting: 'Lead menyusun laporan akhir',
       planning: 'Menyusun rencana',
       analysis: 'Menganalisis proyek',
+      designing: 'Merancang UI/UX',
       programming: 'Menyusun proposal kode',
       qa: 'Pemeriksaan QA statis',
       verifying: 'QA menjalankan test dan build di sandbox',

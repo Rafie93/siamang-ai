@@ -39,6 +39,7 @@ Mulai dari sini sesuai kebutuhan Anda.
 | [ORCHESTRATOR.md](ORCHESTRATOR.md) | Koordinasi satu agent |
 | [PLANNER.md](PLANNER.md) | Rencana dan graf dependensi |
 | [SYSTEM_ANALYST.md](SYSTEM_ANALYST.md) | Analisis project |
+| [DESIGNER.md](DESIGNER.md) | Desain UI/UX sebelum kode |
 | [PROGRAMMER.md](PROGRAMMER.md) | Usulan perubahan kode |
 | [QA.md](QA.md) | Verifikasi statis |
 | [REVIEWER.md](REVIEWER.md) | Penilaian independen |

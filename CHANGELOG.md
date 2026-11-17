@@ -12,6 +12,7 @@ Notable changes to Siamang. No version has been tagged as a GitHub release yet.
 - Autonomy levels and autonomous Lead (opt-in): risk-based gates recorded in the policy's name. Not yet tested with a real model, container and GitHub together.
 - Work division: design documents and work packages run in parallel within a task, with bounded retries, and the record shows what really ran at the same time.
 - Automatic CI repair on an approved, open pull request, a limited number of times.
+- Designer (UI/UX) agent between the Architect and the design gate: user flow, sitemap, design tokens, screen specification, and accessibility, approved with the architecture and handed to the Programmer. Configure it as `[agents.designer]`; without a model its documents say `not_assigned`. A seventh desk in the 3D office.
 - Diagram editor: Mermaid code beside a live preview, with the earlier text kept. At the design gate, approving names what changed; a stopped run goes again on the changed design; on a published task, a change becomes a revision task and the shipped record stands.
 - Web interface in `web/`, in the same repository as the backend, with one version for both.
 - Event stream: `GET /v0/stream` sends what changed as Server-Sent Events, resumable after a dropped connection and scoped to the projects a token may read. API schema 7 adds the `api_changes` log, filled by SQL triggers inside each write's own transaction.

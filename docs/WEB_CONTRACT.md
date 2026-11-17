@@ -42,7 +42,7 @@ Semua route perlu Authorization Bearer dan permission terkait. Scope project dit
 
 ## Pemetaan status untuk frontend
 
-Lifecycle: queued/running/waiting/completed/failed/cancelled. Execution phase terpisah: queued/planning/analysis/programming/qa/reviewing/awaiting_approval/blocked/interrupted/finished/failed/cancelled.
+Lifecycle: queued/running/waiting/completed/failed/cancelled. Execution phase terpisah: queued/briefing/planning/analysis/designing/design_approval/programming/qa/reviewing/awaiting_approval/blocked/interrupted/finished/failed/cancelled.
 
 Aktivitas tahap hanya divisualisasikan saat snapshot baru, lifecycle running, execution.activity_known=true dan stale=false. Heartbeat setiap 3 detik, stale setelah 15 detik menurut server. Tidak ada runtime record: phase=null, state=unknown, activity_known=false. recovery_required dapat menandai legacy running. Status tak dikenal -> netral, bukan sukses.
 

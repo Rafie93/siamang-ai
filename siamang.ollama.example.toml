@@ -26,6 +26,9 @@ model = "engineering"
 [agents.analyst]
 model = "engineering"
 
+[agents.designer]
+model = "engineering"
+
 [agents.programmer]
 model = "engineering"
 

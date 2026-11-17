@@ -116,7 +116,7 @@ latest run recorded. Every document has a `source`:
 `status` is `generated`, `not_applicable` (with a reason), `not_run`, `not_assigned`
 (the agent has no model in `[agents.*]`), or `failed` (with the error code).
 
-When `planner` or `analyst` has a model, a run stops after briefing, planning, and analysis
+When `planner`, `analyst`, or `designer` has a model, a run stops after briefing, planning, analysis, and designing ([DESIGNER.md](DESIGNER.md))
 with `wait_reason=design_approval`, before any code is proposed. `POST /v0/tasks/{id}/design-decision`
 (`approve` permission, body `{"decision", "reason"}`) records the decision with a digest of the
 documents, then resumes the same run or cancels the task. A model failure while writing the
@@ -265,7 +265,7 @@ liveness, not model token progress or completed work.
 | planning | Planner invocation entered |
 | analysis | Analyst invocation entered |
 | programming | Programmer invocation entered, with iteration number |
-| briefing, planning, analysis | A design stage entered; see [Design stages](#design-stages) |
+| briefing, planning, analysis, designing | A design stage entered; see [Design stages](#design-stages) |
 | recovering | The Lead steps in after a failed verification; `attempt` is the recovery round |
 | qa | Static QA invocation entered |
 | reviewing | Reviewer invocation entered |

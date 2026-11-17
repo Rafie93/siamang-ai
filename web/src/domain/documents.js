@@ -4,6 +4,7 @@ export const DOCUMENT_AGENTS = [
   { id: 'lead', officeId: 'amang', name: 'Amang', role: 'Lead Agent' },
   { id: 'planner', officeId: 'planner', name: 'Planner', role: 'Perencana' },
   { id: 'analyst', officeId: 'analyst', name: 'Arsitek', role: 'System Analyst' },
+  { id: 'designer', officeId: 'designer', name: 'Desainer', role: 'UI/UX Designer' },
   { id: 'programmer', officeId: 'programmer', name: 'Programmer', role: 'Implementasi' },
   { id: 'qa', officeId: 'qa', name: 'QA', role: 'Pengujian' },
   { id: 'reviewer', officeId: 'reviewer', name: 'Reviewer', role: 'Evaluasi' },

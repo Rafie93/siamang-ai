@@ -72,6 +72,7 @@ export const PHASE_TEXT = {
   briefing: 'Lead menyusun brief',
   planning: 'Planner menyusun rencana',
   analysis: 'Arsitek merancang',
+  designing: 'Desainer merancang UI/UX',
   design_approval: 'Menunggu persetujuan desain',
   programming: 'Programmer menulis kode',
   qa: 'QA memeriksa',

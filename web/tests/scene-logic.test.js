@@ -3,6 +3,7 @@ import {
   DESKS,
   SPOTS,
   OBSTACLES,
+  WORK_DESKS,
   route,
   seatSpot,
   visitSpot,
@@ -14,8 +15,7 @@ import { createKit } from '../src/three/kit.js'
 import { AGENTS, teamState } from '../src/domain/team.js'
 
 const ids = Object.keys(DESKS)
-const ownDesk = id =>
-  DESKS[id] && OBSTACLES[['planner', 'analyst', 'programmer', 'qa', 'reviewer'].indexOf(id)]
+const ownDesk = id => DESKS[id] && OBSTACLES[WORK_DESKS.indexOf(id)]
 function collisions(path, start, ignore = []) {
   const pts = [start, ...path],
     hits = []
