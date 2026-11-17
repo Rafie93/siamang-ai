@@ -25,6 +25,7 @@
 <p align="center">
   <a href="#overview">Overview</a> ·
   <a href="#the-team">The Team</a> ·
+  <a href="#how-a-task-runs">How a Task Runs</a> ·
   <a href="#demo">Demo</a> ·
   <a href="#changing-the-design">Changing the Design</a> ·
   <a href="#quick-start">Quick Start</a> ·
@@ -68,17 +69,69 @@ Together that is 53 kinds of document. You can turn off the ones you don't need 
 
 <p align="center"><sub>A real run waiting at the design gate: the design agents are finished, and coding waits for your approval.</sub></p>
 
+## How a Task Runs
+
+One task goes through the whole software development cycle: requirements, design, code, test, review and release. Two gates wait for you, and each change you make goes back into the cycle at the right point instead of starting over.
+
+```mermaid
+flowchart TD
+  U(["You: an instruction<br/>in Command"]) --> L["Amang · Lead<br/>asks, writes the brief"]
+  L -->|you confirm| P[Planner<br/>PRD, WBS, criteria]
+  P --> A[Architect<br/>SRS, diagrams, API]
+  A --> D[Designer<br/>tokens, wireframes]
+  D --> G1{"Gate 1<br/>Design approval"}
+  G1 -->|reject with a reason| X([Task cancelled])
+  G1 -->|approve| C[Programmer<br/>patch]
+  C --> Q["QA<br/>static checks<br/>(sandbox tests if on)"] --> R[Reviewer]
+  R -->|held, bounded retries| C
+  R -->|still held| ST[["Stopped:<br/>waits for your direction"]]
+  ST -->|"direction or edited design<br/>→ Kirim ke Programmer"| C
+  R -->|passed| G2{"Gate 2<br/>Final approval"}
+  G2 --> PR["siamang/* branch and PR<br/>(local project: merge to main)"]
+  PR --> CI{GitHub CI}
+  CI -->|failed, bounded| C
+  CI -->|passed| M([You merge])
+
+  E[/"Your edits in Artifacts<br/>diagram · wireframe · tokens"/] -.->|at the gate| G1
+  E -.->|while stopped| ST
+  E -.->|after publishing| V[Revision task]
+  CH[/"Chat with Amang<br/>Revisi: task"/] -.-> V
+  V -.->|a new task| L
+  ASK[/"Ask any agent:<br/>explains its work,<br/>changes nothing"/]
+
+  classDef gate fill:#fff4d6,stroke:#b45309,color:#1f2933
+  classDef you fill:#e6f4ea,stroke:#1b7f52,color:#1f2933
+  class G1,G2,CI gate
+  class U,M,E,CH,ASK you
+```
+
+<sub>Solid lines are the run. Dashed lines are where you step in. Green is you, amber is a gate.</sub>
+
+| Phase | Agents | Output | Who decides it moves on |
+|---|---|---|---|
+| Requirements | Amang, Planner | Brief, task specification, PRD, WBS, acceptance criteria | You confirm the brief |
+| Design | Architect, Designer | SRS, architecture and UML diagrams, API spec, tokens, wireframes | **Gate 1:** you approve, edit or reject |
+| Build | Programmer | Patch, in parallel work packages for large tasks | Code |
+| Verify | QA, Reviewer | Static checks, sandbox tests when on, review findings | Deterministic checks, with bounded retries |
+| Release | – | Commit, `siamang/*` branch, PR, CI | **Gate 2:** you approve; merging stays with you |
+| Change | Any | Edited diagrams, wireframes, tokens, or a revision brief | See [Changing the Design](#changing-the-design) |
+
 ## Demo
 
-These screenshots come from real runs with Claude models. The interface text is in Indonesian.
+These screenshots come from real runs. The interface text is in Indonesian.
 
 ### How it works: the team divides the work
 
-<a href="./docs/images/readme/cara-kerja-membagi-part.png">
-  <img src="./docs/images/readme/cara-kerja-membagi-part.png" alt="The Architect panel during a real run: design documents split into three parts running at the same time. Part 2 is finished after 2 minutes 17 seconds, and parts 1 and 3 are still being written after 2 minutes 28 seconds." width="100%">
+<a href="./docs/images/readme/how-it-works-parts.png">
+  <img src="./docs/images/readme/how-it-works-parts.png" alt="The Architect's dialog in the Office during a real run. Under Pembagian tugas menulis, three parts ran at the same time: parts 1 and 2 finished in 2 min 46 s and 3 min 42 s, part 3 failed after 5 minutes because the model took too long, and its second attempt finished in 3 min 28 s. The work division into Programmer packages finished in 2 min 43 s. Above it, the agent's usage on this task: 194.5k input and 88.5k output tokens, 5 calls with 1 failed, 11 min 11 s." width="100%">
 </a>
 
-Instead of one long model call, the design documents are split into parts that run at the same time. Click any agent to see what it is doing now: which documents each part is writing, how long it has been running, and what is finished. The line "3 parts running at the same time" is computed from the times the backend records, not assumed.
+Instead of one long model call, the design documents are split into parts that run at the same time. Click any agent to see its share of the task:
+
+- **Pembagian tugas menulis** (writing division): which documents each part writes, how long it took, and whether it finished. "3 parts running at the same time" is computed from the times the backend records, not assumed.
+- **Bounded recovery:** here part 3 timed out (*Model terlalu lama menjawab*, the model took too long), so only that part was tried again, alone, and finished. The other parts were kept.
+- **Pemakaian** (usage): input and output tokens, calls, failed calls and time for this agent on this task, failed calls included.
+- **Tanya** (ask): a second tab to ask the agent about its work; see [Changing the Design](#changing-the-design).
 
 ### Artifacts: diagrams drawn on the page
 
@@ -127,15 +180,33 @@ Where the task is decides what an edit does:
 
 ```mermaid
 flowchart LR
-  E["Edit in Artifacts<br/>or tell Amang"] --> S{Where is the task?}
-  S -->|design gate| G[Approve the design<br/>with your edits]
-  S -->|stopped| K[Send to Programmer]
-  S -->|published| V[Revision task]
-  G --> C[Programmer builds from<br/>the edited design]
+  subgraph how ["How you ask for a change"]
+    direction TB
+    E1[/"Edit diagram<br/>Mermaid"/]
+    E2[/"Edit wireframe<br/>HTML"/]
+    E3[/"Edit token<br/>JSON"/]
+    CH[/"Chat with Amang<br/>Revisi: task · Arahan untuk tim"/]
+  end
+  how --> S{Where is the task?}
+  S -->|"Gate 1: waiting for<br/>design approval"| G["Approve the design<br/>names every edited block"]
+  S -->|"Stopped: held by<br/>QA, Reviewer or Programmer"| K["Kirim ke Programmer<br/>the same run goes again"]
+  S -->|"Published: PR open<br/>or merged"| V["Buat task revisi<br/>a new task; old record stays"]
+  G --> C["Programmer builds from the<br/>edited design (owner_edited first)"]
   K --> C
   V --> C
   C --> Q[QA and Reviewer] --> A{Final approval} --> PR[Commit and PR]
 ```
+
+<table>
+  <tr>
+    <td width="62%"><a href="./docs/images/readme/artifacts-diagram-editor.png"><img src="./docs/images/readme/artifacts-diagram-editor.png" alt="Edit diagram: Class Diagram. Mermaid code on the left, a live preview of the class diagram on the right, and Batal and Simpan buttons. A note says the task is already published, so a change is saved as a proposal for a revision task and the original document does not change."></a></td>
+    <td width="38%"><a href="./docs/images/readme/agent-ask.png"><img src="./docs/images/readme/agent-ask.png" alt="The Architect's Tanya tab, with threads for this task and for the project. A note says asking does not change the work; to request a change, send directions through Amang."></a></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Edit diagram: code beside a live preview. On a published task the edit becomes a revision proposal.</sub></td>
+    <td align="center"><sub>Tanya: ask an agent about its work. Asking changes nothing.</sub></td>
+  </tr>
+</table>
 
 ### What is kept
 
@@ -155,22 +226,6 @@ Coding agents often report "all tests pass". In Siamang, a model cannot make tha
 | **Decisions are bound to evidence** | Approval recomputes the evidence chain and refuses anything that changed | Automatic decisions recorded the same way |
 | **Failure means repair, within limits** | A failed design stage retries up to three rounds, a timed-out package splits in two, and failed CI returns to the Programmer; all bounded and recorded | Replanning that really changes the steps |
 | **Autonomy can be audited** | Two gates need a human by default; risk-based gates can be turned on, and their decisions are recorded in the policy's name | Levels per project |
-
-### How a task runs
-
-```mermaid
-flowchart LR
-  T[Instruction] --> L[Amang / Lead]
-  L --> P[Planner] --> A[Architect] --> D[UI/UX Designer]
-  D --> G1{Design approval}
-  G1 --> C[Programmer]
-  C --> Q[Static QA] --> R[Reviewer]
-  R -->|held| C
-  R -->|passed| G2{Final approval}
-  G2 --> PR["siamang/* branch and PR"]
-  PR --> CI{GitHub CI}
-  CI -->|failed, bounded| C
-```
 
 ## Quick Start
 
