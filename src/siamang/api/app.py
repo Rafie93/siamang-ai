@@ -27,7 +27,7 @@ from siamang.tasks import TaskEngine, TaskRequest
 from siamang.tasks.errors import TaskError
 from siamang.tasks.lifecycle import TaskStatus
 
-from . import model_settings
+from . import model_settings, usage
 from .runtime import Runtime, RuntimeRefusal
 from .settings import APISettings
 from .store import RunStore, now
@@ -268,6 +268,15 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
             raise RuntimeRefusal('not_found', 404)
         return public(ProjectRegistry(db).get(project_id).to_dict())
 
+    @app.get('/v0/projects/{project_id}/usage')
+    async def project_usage(project_id: str, principal=Depends(permission('read')), db=Depends(database)):
+        """Tokens and time per agent and per task, and what the project used outside any task."""
+        if not principal.allows_project(project_id):
+            raise RuntimeRefusal('not_found', 404)
+        project = ProjectRegistry(db).get(project_id)
+        with db.transaction():  # one snapshot: calls, activities, and run events read together
+            return public(usage.project_usage(db, project, RunStore(db).usage_since(), now()))
+
     @app.post('/v0/projects', status_code=202)
     async def new_project(body: NewProject, principal=Depends(permission('submit'))):
         if not principal.allows_project('*'):  # a new project is outside any finite scope
@@ -322,6 +331,7 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
     @app.get('/v0/portfolio')
     async def portfolio(principal=Depends(permission('read')), db=Depends(database)):
         items, store = [], RunStore(db)
+        spent = usage.project_summaries(db)
         for p in ProjectRegistry(db).list(status=None):
             if not principal.allows_project(p.project_id):
                 continue
@@ -334,7 +344,8 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
                                                 'waiting': {r['wait_reason']: r['n'] for r in waiting},
                                                 'features': public(store.features(p.project_id)),
                                                 'repository': public(store.repo(p.project_id)),
-                                                'spec_state': (store.spec(p.project_id) or {}).get('state')})
+                                                'spec_state': (store.spec(p.project_id) or {}).get('state'),
+                                                'usage': spent.get(p.project_id) or usage.summary()})
         return {'items': items, 'observed_at': now()}
 
     @app.get('/v0/office')
@@ -377,9 +388,12 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
             raise RuntimeRefusal('not_found', 404)
         engine, store = TaskEngine(db, ProjectRegistry(db)), RunStore(db)
         with db.transaction():  # one snapshot, as in the task route
-            return {'items': [public(t.to_dict()) | {'execution': execution_snapshot(t, store), 'branch': public(store.branch(t.task_id))}
-                              for t in engine.list(project_id=project_id, status=status, limit=limit, offset=offset)],
-                    'observed_at': now()}
+            listed, observed = engine.list(project_id=project_id, status=status, limit=limit, offset=offset), now()
+            spent = usage.task_summaries(db, [t.task_id for t in listed], observed)
+            return {'items': [public(t.to_dict()) | {'execution': execution_snapshot(t, store), 'branch': public(store.branch(t.task_id)),
+                                                     'usage': spent[t.task_id]}
+                              for t in listed],
+                    'observed_at': observed}
 
     def check_task_links(store, project_id, feature_id, revises_task_id):
         if feature_id and not any(f['feature_id'] == feature_id for f in store.features(project_id)):
@@ -493,6 +507,13 @@ def create_app(settings: APISettings | None = None, *, models=None, authors=None
                                           'branch': public(store.branch(task_id)), 'packages': public(store.public_packages(task_id)),
                                           'design_parts': public(store.design_parts(task_id)),
                                           'ci': public(store.ci(task_id)), 'observed_at': now()}
+
+    @app.get('/v0/tasks/{task_id}/usage')
+    async def task_usage(task_id: str, principal=Depends(permission('read')), db=Depends(database)):
+        """Tokens and time per agent, the task's own draft conversation included."""
+        with db.transaction():
+            task = scoped_task(db, task_id, principal)
+            return public(usage.task_usage(db, task, RunStore(db).usage_since(), now()))
 
     @app.get('/v0/tasks/{task_id}/messages')
     async def task_messages(task_id: str, principal=Depends(permission('read')), db=Depends(database)):

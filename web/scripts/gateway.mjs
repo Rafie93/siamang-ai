@@ -3,7 +3,7 @@ import { once } from 'node:events'
 const STREAM = '/v0/stream'
 export function permitted(method, path) {
   if (method === 'GET')
-    return /^\/v0\/(health|capabilities|stream|settings\/models|openapi\.json|portfolio|office|projects(?:\/prj_[A-Za-z0-9]+(?:\/(features|intake|drafts(?:\/dft_[A-Za-z0-9]+)?))?)?|tasks(?:\/tsk_[A-Za-z0-9]+(?:\/(events|execution-events|reports|documents|document-edits|messages))?)?|approvals)$/.test(
+    return /^\/v0\/(health|capabilities|stream|settings\/models|openapi\.json|portfolio|office|projects(?:\/prj_[A-Za-z0-9]+(?:\/(features|intake|usage|drafts(?:\/dft_[A-Za-z0-9]+)?))?)?|tasks(?:\/tsk_[A-Za-z0-9]+(?:\/(events|execution-events|reports|documents|document-edits|messages|usage))?)?|approvals)$/.test(
       path,
     )
   return (

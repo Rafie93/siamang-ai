@@ -9,6 +9,7 @@ import shutil
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 
 from siamang.analyst import AnalysisRequest, SystemAnalyst
@@ -53,6 +54,7 @@ from siamang.documents.lead import (
 )
 from siamang.jsondata import thaw
 from siamang.log import redact
+import siamang.models.metering as metering
 from siamang.models.errors import ModelError
 from siamang.programmer.policy import ProgrammingPolicy
 from siamang.repos.client import RepoClient, RepoError
@@ -314,14 +316,15 @@ class Runtime:
                 store.initialize()
                 engine = TaskEngine(db, ProjectRegistry(db))
                 with db.transaction():
-                    rows = db.conn.execute("SELECT run_id,task_id FROM api_runs "
+                    rows = db.conn.execute("SELECT run_id,task_id,heartbeat_at FROM api_runs "
                                            "WHERE state IN ('scheduled','running')").fetchall()
                     for row in rows:
                         task = engine.get(row['task_id'])
                         if task.status == 'running':
                             engine.wait(task.task_id, reason='worker_interrupted')
+                        # The last sign of life ends the run's working time: the hours the server was down are not work.
                         store.update(row['run_id'], state='interrupted', phase='interrupted',
-                                     wait_reason='worker_interrupted')
+                                     wait_reason='worker_interrupted', last_heartbeat=row['heartbeat_at'])
             self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='siamang-proposals')
             self._background = ThreadPoolExecutor(max_workers=1, thread_name_prefix='siamang-lead')
             self._ci_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='siamang-ci')
@@ -360,6 +363,28 @@ class Runtime:
             return self._authors.get(agent)
         from siamang.config import load_config
         return self.models(agent) if agent in load_config(self.settings.config).agents else None
+
+    # -- metering: every model call and every stretch of an agent's work, as it happened ----------------
+
+    def _record(self, kind, record):
+        """Metering's sink. Its own short connection: it is called from whichever thread did the work."""
+        with Database(self.settings.database) as db:
+            RunStore(db).record_usage(kind, record)
+
+    @contextmanager
+    def _measured_run(self, run_id):
+        """What a run's worker does is metered as that run's, its packages and side-by-side document parts included."""
+        with Database(self.settings.database) as db:
+            row = db.conn.execute('SELECT r.task_id, t.project_id FROM api_runs r JOIN tasks t ON t.task_id=r.task_id '
+                                  'WHERE r.run_id=?', (run_id,)).fetchone()
+        task_id, project_id = (row['task_id'], row['project_id']) if row else (None, None)
+        with metering.scope(sink=self._record, project_id=project_id, task_id=task_id, run_id=run_id):
+            yield
+
+    @staticmethod
+    def _working(agent, stage, router):
+        """An agent's activity, timed only when it has a model: an agent without one did no work to measure."""
+        return metering.activity(agent, stage) if router is not None else nullcontext()
 
     def assignments(self):
         """Which model each agent uses, as configured. Injected routers report nothing."""
@@ -438,10 +463,12 @@ class Runtime:
             store.finish_part(run_id, 'division', 1, tries + attempt, state='failed' if failure else 'done', reason=failure or None,
                               model_id=None, started_at=began, finished_at=finished)
 
-        division = divide(self.author('analyst'), dict(
-            instruction=task.description, project_spec=spec, task_conversation=conversation, repository=repository,
-            design=[dict(document=d.spec.kind, text=clip(d.content, 3_000)) for d in design
-                    if d.status is DocumentStatus.GENERATED]), started, ended)
+        analyst = self.author('analyst')
+        with self._working('analyst', 'division', analyst):
+            division = divide(analyst, dict(
+                instruction=task.description, project_spec=spec, task_conversation=conversation, repository=repository,
+                design=[dict(document=d.spec.kind, text=clip(d.content, 3_000)) for d in design
+                        if d.status is DocumentStatus.GENERATED]), started, ended)
         work = division.plan
         if work and work.undecided:
             self._stop_for_owner(db, store, engine, run_id, task, 'clarification_required',
@@ -487,7 +514,7 @@ class Runtime:
         pulse = threading.Thread(target=self._heartbeat, args=(run_id, done), daemon=True)
         pulse.start()
         try:
-            with Database(self.settings.database) as db:
+            with self._measured_run(run_id), Database(self.settings.database) as db:
                 engine, store = TaskEngine(db, ProjectRegistry(db)), RunStore(db)
                 task_id = store.get(run_id)['task_id']
                 try:
@@ -526,8 +553,9 @@ class Runtime:
     def _work(self, run_id, mode='start'):
         """One run on the single worker. It keeps the worker across a gate that passed, so no other task slips in."""
         try:
-            while mode:
-                mode = self._attempt(run_id, mode)
+            with self._measured_run(run_id):
+                while mode:
+                    mode = self._attempt(run_id, mode)
         finally:
             self._busy.release()
 
@@ -561,7 +589,8 @@ class Runtime:
                     if not (required and router is not None):
                         if router is not None:
                             phase(stage, iteration=None)
-                        written = write_documents(router, stage, context)
+                        with self._working(agent, stage, router):
+                            written = write_documents(router, stage, context)
                         store.save_documents(run_id, task_id, written)
                         return written
                     # The stage is several model calls side by side. A round repeats only what failed, with more time,
@@ -575,32 +604,33 @@ class Runtime:
                         return tuple(done[k] for g in batches(stage) for k in g)
                     reason = None
                     numbered = {k: i for i, g in enumerate(batches(stage), 1) for k in g}
-                    for attempt in range(1, DESIGN_ATTEMPTS + 1):
-                        phase(stage, iteration=None, attempt=attempt, retry_reason=reason,
-                              remaining=sum(map(len, pending)) if attempt > 1 else None,
-                              reused=len(done) if attempt == 1 and done else None)
-                        timeout = DESIGN_TIMEOUTS[min(attempt, len(DESIGN_TIMEOUTS)) - 1]
-                        for group in pending:
-                            store.start_part(run_id, stage, numbered[group[0]], attempt, group, timeout)
+                    with metering.activity(agent, stage):  # every round, retries included
+                        for attempt in range(1, DESIGN_ATTEMPTS + 1):
+                            phase(stage, iteration=None, attempt=attempt, retry_reason=reason,
+                                  remaining=sum(map(len, pending)) if attempt > 1 else None,
+                                  reused=len(done) if attempt == 1 and done else None)
+                            timeout = DESIGN_TIMEOUTS[min(attempt, len(DESIGN_TIMEOUTS)) - 1]
+                            for group in pending:
+                                store.start_part(run_id, stage, numbered[group[0]], attempt, group, timeout)
 
-                        def finished(group, written, started, ended):
-                            # As each part ends, so its documents and its timing are there to see while the others still run.
-                            store.save_documents(run_id, task_id, written, state['basis'])
-                            bad = next((d.reason or 'unknown' for d in written if d.status is DocumentStatus.FAILED), None)
-                            store.finish_part(run_id, stage, numbered[group[0]], attempt, state='failed' if bad else 'done',
-                                              reason=bad, model_id=written[0].model_id if written else None,
-                                              started_at=started, finished_at=ended)
+                            def finished(group, written, started, ended):
+                                # As each part ends, so its documents and its timing are there to see while the others still run.
+                                store.save_documents(run_id, task_id, written, state['basis'])
+                                bad = next((d.reason or 'unknown' for d in written if d.status is DocumentStatus.FAILED), None)
+                                store.finish_part(run_id, stage, numbered[group[0]], attempt, state='failed' if bad else 'done',
+                                                  reason=bad, model_id=written[0].model_id if written else None,
+                                                  started_at=started, finished_at=ended)
 
-                        written = write_batches(router, stage, pending, context, timeout, on_done=finished)
-                        failed = [d for d in written if d.status is DocumentStatus.FAILED]
-                        done |= {d.spec.kind: d for d in written if d.status is not DocumentStatus.FAILED}
-                        if not failed:
-                            return tuple(done[k] for g in batches(stage) for k in g)
-                        reason = failed[0].reason or 'unknown'
-                        again = {d.spec.kind for d in failed}
-                        pending = [tuple(k for k in g if k in again) for g in pending]
-                        pending = [g for g in pending if g]
-                    raise DesignFailed(stage, reason, DESIGN_ATTEMPTS)
+                            written = write_batches(router, stage, pending, context, timeout, on_done=finished)
+                            failed = [d for d in written if d.status is DocumentStatus.FAILED]
+                            done |= {d.spec.kind: d for d in written if d.status is not DocumentStatus.FAILED}
+                            if not failed:
+                                return tuple(done[k] for g in batches(stage) for k in g)
+                            reason = failed[0].reason or 'unknown'
+                            again = {d.spec.kind for d in failed}
+                            pending = [tuple(k for k in g if k in again) for g in pending]
+                            pending = [g for g in pending if g]
+                        raise DesignFailed(stage, reason, DESIGN_ATTEMPTS)
 
                 with db.transaction():
                     if engine.get(task_id).status == 'cancelled':
@@ -644,8 +674,9 @@ class Runtime:
                 if gated and repo and self.author('lead') and not briefed and not store.draft_of_task(task_id):  # a draft already asked
                     # Only what the Lead really asked: an answer it settled itself is not a round of questions.
                     rounds = sum(1 for m in store.messages(task.project_id, task_id) if m['role'] == 'lead' and m.get('questions'))
-                    reply = ask_lead(self.author('lead'), TASK_PROMPT,
-                                     brief | dict(rounds_left=max(MAX_TASK_ROUNDS - rounds, 0)))
+                    with metering.activity('lead', 'clarification'):
+                        reply = ask_lead(self.author('lead'), TASK_PROMPT,
+                                         brief | dict(rounds_left=max(MAX_TASK_ROUNDS - rounds, 0)))
                     if not reply.ready and rounds < MAX_TASK_ROUNDS:
                         self._stop_for_owner(db, store, engine, run_id, task, 'clarification_required', reply.message, reply.questions)
                         return None
@@ -671,7 +702,8 @@ class Runtime:
                     def program(self, request):
                         self.iteration += 1
                         phase('programming', self.iteration)
-                        self.last = super().program(request)
+                        with metering.activity('programmer', 'programming'):
+                            self.last = super().program(request)
                         return self.last
 
                 programmer = TrackedProgrammer(engine, models=self.models('programmer'), policy=MODEL_POLICY,
@@ -680,12 +712,14 @@ class Runtime:
                 class TrackedQA(QAService):
                     def verify(self, request):
                         phase('qa', programmer.iteration)
-                        return super().verify(request)
+                        with metering.activity('qa', 'qa'):  # checks without a model: only an activity measures it
+                            return super().verify(request)
 
                 class TrackedReviewer(ReviewerService):
                     def review(self, request):
                         phase('reviewing', programmer.iteration)
-                        return super().review(request)
+                        with metering.activity('reviewer', 'reviewing'):
+                            return super().review(request)
 
                 packages = store.work_packages(run_id) if repo else []
                 if packages:
@@ -738,8 +772,9 @@ class Runtime:
                                 'menjalankannya.' if made.get('sandbox_mode') == 'finished' and not made.get('sandbox_verified') else '')
                         if verifier is not None:
                             phase('verifying', ctx.attempt)
-                            state['verification'] = report = verifier.verify(
-                                project.root_path, run.final_patch.changes, verify.criteria_from(design))
+                            with metering.activity('qa', 'verifying'):
+                                state['verification'] = report = verifier.verify(
+                                    project.root_path, run.final_patch.changes, verify.criteria_from(design))
                             output['verification'] = report.to_dict()
                             if report.status == 'failed':
                                 return StageOutcome(False, failure=verify.failure_text(report))
@@ -754,8 +789,9 @@ class Runtime:
                             return deliver(ctx)
                         return [Stage('deliver_replanned', again)]
 
+                    advising = 'lead' if self.author('lead') is not None else 'analyst'
                     recovered = RecoveryEngine(
-                        advisor=recover.advisor(self.author('lead') or self.author('analyst'), task.description),
+                        advisor=recover.advisor(self.author(advising), task.description, agent=advising),
                         replanner=replan, checkpoints=checkpoint, policy=recovery).run(
                             key, [Stage('deliver', deliver)], keep_checkpoint=True)
                     if recovered.resumed:
@@ -769,7 +805,8 @@ class Runtime:
                 elif verifier is not None and loop.passed and loop.final_patch:
                     for attempt in range(1, attempts + 2):
                         phase('verifying', attempt)
-                        verification = verifier.verify(project.root_path, loop.final_patch.changes, verify.criteria_from(design))
+                        with metering.activity('qa', 'verifying'):
+                            verification = verifier.verify(project.root_path, loop.final_patch.changes, verify.criteria_from(design))
                         if verification.status != 'failed' or attempt > attempts or packages:
                             break
                         loop = run_loop(verify.failure_input(verification))
@@ -1000,8 +1037,9 @@ class Runtime:
         self._lead_thinking(db, store, engine, run_id, task)
         answered = [d for d in store.decisions(task.task_id) if d['gate'] == 'question' and d['outcome'] == 'answered']
         sources = autonomy.sources(store, task)
-        resolved = settle(router, questions, sources, policy.lead_answers - len(answered),
-                          frozenset(d['payload']['key'] for d in answered))
+        with metering.activity('lead', 'deciding'):
+            resolved = settle(router, questions, sources, policy.lead_answers - len(answered),
+                              frozenset(d['payload']['key'] for d in answered))
         evidence = hashlib.sha256(json.dumps(sources, sort_keys=True).encode()).hexdigest()
         with db.transaction():
             self._still_ours(engine, task.task_id)
@@ -1030,7 +1068,8 @@ class Runtime:
             step = Step('ask_owner', reason=f'Lead sudah mengembalikan pekerjaan ini {len(revisions)} kali.')
         else:
             self._lead_thinking(db, store, engine, run_id, task)
-            step = next_step(router, task.description, blockers)
+            with metering.activity('lead', 'deciding'):
+                step = next_step(router, task.description, blockers)
         self._decide(store, run_id, task.task_id, 'next_step', step.action if step.action == 'revise' else 'forwarded', LEAD_ACTOR,
                      reasons=(step.reason,) if step.reason else (), payload=dict(blockers=mark, direction=step.direction))
         if step.action != 'revise':
@@ -1098,7 +1137,7 @@ class Runtime:
             analysis = with_planned_paths(SystemAnalyst(engine).analyze(AnalysisRequest(
                 **ids, plan=plan, focus=tuple(c.path for c in merged.changes)[:20], scope=tuple(dict.fromkeys(owns))[:20])), owner_texts)
 
-            def stage(cls, method, name):
+            def stage(cls, method, name, agent):
                 class Tracked(cls):
                     pass
                 inner = getattr(cls, method)
@@ -1108,13 +1147,14 @@ class Runtime:
                         if self._tasks.get(task.task_id).status == 'cancelled':
                             raise Stopped()
                         store.update(run_id, state='running', phase=name, iteration=1)
-                    return inner(self, request)
+                    with metering.activity(agent, name):
+                        return inner(self, request)
                 setattr(Tracked, method, call)
                 return Tracked
 
-            programmer = Merged(engine, merged, summary)
-            loop = LoopService(engine, programmer, stage(QAService, 'verify', 'qa')(engine, policy=QA_POLICY),
-                               stage(ReviewerService, 'review', 'reviewing')(engine, policy=INTEGRATION_REVIEW),
+            programmer = Merged(engine, merged, summary)  # joins finished patches: no model, no work to time
+            loop = LoopService(engine, programmer, stage(QAService, 'verify', 'qa', 'qa')(engine, policy=QA_POLICY),
+                               stage(ReviewerService, 'review', 'reviewing', 'reviewer')(engine, policy=INTEGRATION_REVIEW),
                                policy=ONE_ROUND).run(LoopRequest(**ids, plan=plan, analysis=analysis, input=dict(base)))
             if loop.passed or attempt == 2:
                 return loop, analysis, programmer
@@ -1258,8 +1298,10 @@ class Runtime:
         if len(names) <= limit:
             return tuple(names)
         texts = [d.content for d in documents if d.status is DocumentStatus.GENERATED] + ([log] if log else [])
-        chosen = choose_files(self.author('analyst'), dict(
-            instruction=task.description, design=[clip(t, 3_000) for t in texts]), names, limit)
+        analyst = self.author('analyst')
+        with self._working('analyst', 'focus', analyst):
+            chosen = choose_files(analyst, dict(
+                instruction=task.description, design=[clip(t, 3_000) for t in texts]), names, limit)
         in_log = [n for n in names if n in log]  # a failing build names its own files
         return tuple(dict.fromkeys(in_log + list(chosen or named_in(names, texts))))[:limit]
 
@@ -1488,13 +1530,15 @@ class Runtime:
             history = store.messages(project_id)
             rounds = sum(1 for m in history if m['role'] == 'lead')
             project, spec, repo = ProjectRegistry(db).get(project_id), store.spec(project_id), store.repo(project_id)
-            # A local project is new: its repository holds only the first README, so there is nothing to read yet.
-            reply = ask_lead(router, INTAKE_PROMPT, dict(
-                project=dict(name=project.name, repository=repo['repository'] or None,
-                             source='new_local_project' if is_local(repo) else 'github_repository'),
-                repository=read_latest(self._repos, project.root_path, repo['default_branch'], local=is_local(repo)),
-                conversation=history,
-                current_spec=spec['content'], rounds_left=max(MAX_INTAKE_ROUNDS - rounds, 0)))
+            # Before any task: the project's own record, shown apart from its tasks.
+            with metering.scope(sink=self._record, project_id=project_id), metering.activity('lead', 'intake'):
+                # A local project is new: its repository holds only the first README, so there is nothing to read yet.
+                reply = ask_lead(router, INTAKE_PROMPT, dict(
+                    project=dict(name=project.name, repository=repo['repository'] or None,
+                                 source='new_local_project' if is_local(repo) else 'github_repository'),
+                    repository=read_latest(self._repos, project.root_path, repo['default_branch'], local=is_local(repo)),
+                    conversation=history,
+                    current_spec=spec['content'], rounds_left=max(MAX_INTAKE_ROUNDS - rounds, 0)))
         except (ModelError, RepoError) as exc:
             store.set_spec(project_id, state='failed', error=str(exc.code))
             return
@@ -1665,7 +1709,10 @@ class Runtime:
                     context |= dict(project_spec=(store.spec(project_id) or {}).get('content', ''),
                                     repository=read_latest(self._repos, project.root_path, repo['default_branch'],
                                                            self._open_revision(store, repo, draft), local=is_local(repo)))
-                reply = ask_lead(self.author('lead'), DRAFT_PROMPT, context)
+                # Counted toward the task the draft becomes; a draft never confirmed stays with the project.
+                with (metering.scope(sink=self._record, project_id=project_id, draft_id=draft_id),
+                      metering.activity('lead', 'draft')):
+                    reply = ask_lead(self.author('lead'), DRAFT_PROMPT, context)
                 if reply.ready and not reply.spec.strip():
                     raise RepoError('lead_returned_empty_brief')
             except (ModelError, RepoError) as exc:

@@ -30,6 +30,9 @@ describe('scopesFor', () => {
     expect(scopes(...changed(['drafts'], null))).toEqual(['drafts'])
     expect(scopes(...changed(['project'], null))).toEqual(['board', 'intake'])
     expect(scopes(...changed(['autonomy']))).toEqual([]) // no page shows it yet
+    expect(scopes(...changed(['usage']))).toEqual(['projectUsage', 'tasks', 'usage'])
+    expect(scopes(...changed(['usage'], null))).toEqual(['projectUsage', 'tasks']) // the intake or a draft
+    expect(scopes(...changed(['usage'], 'tsk_z', 'prj_z'))).toEqual([])
     expect(scopes(...changed(['a_part_from_a_newer_backend']))).toEqual([])
   })
   it('does not load another project into this page', () => {
@@ -40,7 +43,7 @@ describe('scopesFor', () => {
     expect(scopes(...changed(['project'], null, 'prj_z'))).toEqual(['board'])
   })
   it('only names scopes a full refresh also loads', () => {
-    const everything = ['documents', 'messages', 'reports', 'task', 'drafts', 'project']
+    const everything = ['documents', 'messages', 'reports', 'task', 'drafts', 'project', 'usage']
     for (const scope of scopesFor(
       'changed',
       { project_id: 'prj_a', task_id: 'tsk_a', parts: everything },

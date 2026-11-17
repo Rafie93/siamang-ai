@@ -271,6 +271,48 @@ summary, file list, and static check status, so those are visible to anyone who 
 
 `POST /v0/tasks` accepts an optional `feature_id` of the same project.
 
+## Tokens and time
+
+Every model call and every stretch of an agent's work is recorded as it happens (API schema 8): `api_model_calls` holds one
+row per call, failed calls included, and `api_agent_activity` one row per activity. Both are append-only. Nothing is
+estimated. A count the provider did not report (a timeout) stays unknown, is counted as a call, and is named, never
+added in as zero tokens.
+
+| Route | Permission | Purpose |
+|---|---|---|
+| `GET /v0/tasks/{id}/usage` | read | The task's totals and one row per agent |
+| `GET /v0/projects/{id}/usage` | read | The project's totals, one row per agent and per task, and `outside_tasks` |
+
+Token fields, in totals and in every row: `input_tokens`, `output_tokens`, `total_tokens` (input plus output),
+`cache_read_tokens`, `cache_write_tokens`, `calls`, `failed_calls`, `unreported_calls` (calls without a token count) and
+`model_ms` (the calls' own durations, added up).
+
+- **Input counts the prompt cache.** Claude reports most of a prompt as cache reads or writes: a real `claude -p` call
+  reports `input_tokens: 2` beside `cache_creation_input_tokens: 1103`. `input_tokens` is everything the model read;
+  `cache_read_tokens` and `cache_write_tokens` say how much of it went through the cache. For `claude_cli` the counts come
+  from `modelUsage`, each model's total over every turn of the call (`--json-schema` takes two); `usage` stands in when
+  `modelUsage` lacks the numbers. Ollama reports `prompt_eval_count` and `eval_count`, and has no cache to report.
+- **A failed call keeps its tokens when they are known.** A reply that arrived but was unusable (invalid JSON, another
+  model) still cost its tokens, and a `claude -p` error that reports usage keeps it.
+- **Agent rows** (`agents`): `agent` (`lead`, `planner`, `analyst`, `designer`, `programmer`, `qa`, `reviewer`, in that
+  order; `unknown` only for a call made outside any activity, which no code path does), `models` used, the token fields,
+  and `active_ms`: how long the agent worked, as the union of its activities, so Programmers on parallel packages count
+  once. An activity is timed around the work itself, model or not: QA and the Reviewer check without a model, and
+  `verifying` (tests in the sandbox) is QA's. An agent without a model writes no documents, so that stage adds no
+  time; an agent that did nothing in the task gets no row.
+- **Task totals** add `work_ms` and `waiting_ms`: how long the task's runs were `running`, and `waiting` for the owner,
+  from the execution events. Queueing counts toward neither. A run cut off by a restart stops counting at its last
+  heartbeat, which startup records as `last_heartbeat` on the `interrupted` event. Tasks from before schema 8 have these
+  too, but no tokens.
+- **Drafts** belong to the task they became. The project's intake conversation and drafts that never became a task are
+  `outside_tasks` (token fields and `active_ms`). A project's totals are its tasks plus `outside_tasks`.
+- **`complete`** is `false` when the task or project began before recording did (`since`): its token totals miss that
+  earlier work.
+
+`GET /v0/tasks` items and `GET /v0/portfolio` items carry a short `usage`: `input_tokens`, `output_tokens`,
+`total_tokens`, `calls`, `unreported_calls`, plus `work_ms` on tasks. Each new row also announces a `changed` event with
+the `usage` part.
+
 ## Lifecycle, execution stage, and evidence
 
 Lifecycle remains `queued`, `running`, `waiting`, `completed`, `failed`,
@@ -352,9 +394,11 @@ started model call may finish before the worker stops; its proposal is discarded
 | GET | `/v0/stream?after=0` | read; Server-Sent Events for the projects in scope, see [Event stream](#event-stream) |
 | GET | `/v0/projects` | read; scoped registered projects, local root paths withheld |
 | GET | `/v0/projects/{project_id}` | read; scoped project |
-| GET | `/v0/tasks?project_id=...&status=...&limit=100&offset=0` | read; lifecycle + execution snapshots |
+| GET | `/v0/projects/{project_id}/usage` | read; tokens and time per agent and per task, see [Tokens and time](#tokens-and-time) |
+| GET | `/v0/tasks?project_id=...&status=...&limit=100&offset=0` | read; lifecycle + execution snapshots, with a short `usage` |
 | POST | `/v0/tasks` | submit; persist a task, no automatic execution |
 | GET | `/v0/tasks/{task_id}` | read; task, latest execution record, `packages`, and `design_parts` |
+| GET | `/v0/tasks/{task_id}/usage` | read; the task's tokens and time per agent, its draft conversation included |
 | GET | `/v0/tasks/{task_id}/events?after_seq=0&limit=100` | read; lifecycle envelope replay |
 | GET | `/v0/tasks/{task_id}/execution-events?after=0&limit=100` | read; persisted real stage transitions, oldest first; page with `after` to reach the newest |
 | POST | `/v0/tasks/{task_id}/run` | run; schedule queued task, 202 after storage succeeds |
@@ -392,8 +436,8 @@ curl -N -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8765/v0/stream
 | `ping` | yes | `at` | Nothing else to say. Every 10 seconds, so a client can tell a quiet stream from a dead one |
 
 `parts` of `changed`: `task` (`/tasks/{id}`: packages, design parts, branch, CI), `documents`, `messages` (with no task, the project's
-intake), `reports` (with `/approvals`), `autonomy`, `drafts`, `project` (`/portfolio`, `/projects`, `/projects/{id}/intake`). Ignore event
-types and parts you do not know.
+intake), `reports` (with `/approvals`), `autonomy`, `drafts`, `project` (`/portfolio`, `/projects`, `/projects/{id}/intake`), `usage`
+(`/tasks/{id}/usage` and `/projects/{id}/usage`; with no task, the intake or a draft). Ignore event types and parts you do not know.
 
 **Resuming.** A browser's `EventSource` reconnects by itself and sends `Last-Event-ID`; other clients can send that header or
 `?after=`, and the header wins. Everything after that position is replayed in commit order, with no gap and no repeat. With no

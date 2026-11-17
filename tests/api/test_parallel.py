@@ -96,8 +96,11 @@ def approve_design(client, task_id):
 
 
 def waited(client, task_id):
-    return until(lambda: snapshot(client, task_id)['status'] == 'waiting' and snapshot(client, task_id)['execution']['phase'] != 'queued'
-                 and snapshot(client, task_id), 'a stop', seconds=30)
+    def stopped():
+        # One snapshot per look: three reads could pair a queued task's status with the phase of the run that started.
+        s = snapshot(client, task_id)
+        return s['status'] == 'waiting' and s['execution']['phase'] != 'queued' and s
+    return until(stopped, 'a stop', seconds=30)
 
 
 def test_packages_run_at_the_same_time_after_the_foundation_and_reach_one_pull_request(world):
@@ -116,6 +119,16 @@ def test_packages_run_at_the_same_time_after_the_foundation_and_reach_one_pull_r
         assert team.seen[0] == 'Fondasi' and team.peak == 2 and set(team.seen[1:]) == {'Backend', 'Frontend'}
         current = snapshot(client, task_id)
         assert {p['state'] for p in current['packages']} == {'passed'} and sum(p['files'] for p in current['packages']) == 5
+        keys = {p['key'] for p in current['packages']}
+        with Database(world.settings.database) as db:
+            calls = [dict(r) for r in db.conn.execute('SELECT * FROM api_model_calls WHERE task_id=?', (task_id,))]
+            spans = [dict(r) for r in db.conn.execute('SELECT * FROM api_agent_activity WHERE task_id=?', (task_id,))]
+        # Each Programmer's call, in its own thread, is counted toward the run and its own package.
+        coding = [c for c in calls if c['purpose'] in ('programming', 'programming_tools')]
+        assert len(coding) == 3 and {c['package'] for c in coding} == keys and all(c['run_id'] == run_id for c in coding)
+        assert all(c['agent'] for c in calls)
+        assert {(s['agent'], s['package']) for s in spans if s['package']} == {
+            (agent, key) for agent in ('programmer', 'qa', 'reviewer') for key in keys}
 
         assert client.post('/v0/approvals/' + run_id, headers=headers('approver'), json={'decision': 'approve'}).status_code == 200
         branch = until(lambda: snapshot(client, task_id)['branch']['publication'] == 'published' and snapshot(client, task_id)['branch'], 'published')

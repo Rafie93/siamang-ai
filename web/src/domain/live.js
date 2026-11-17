@@ -13,6 +13,8 @@ export const ALL_SCOPES = Object.freeze([
   'reports',
   'documents',
   'stage',
+  'usage',
+  'projectUsage',
 ])
 
 /** The scopes an event makes out of date, given what the page is showing. Heartbeats and pings change nothing to load. */
@@ -49,6 +51,10 @@ export function scopesFor(type, data, { selectedId, stageId, projectId }) {
       if (thisProject) out.add('tasks')
       if (selected) out.add('task')
       if (staged) out.add('stage')
+    } else if (part === 'usage') {
+      // A model call or an agent's stretch of work ended. The portfolio's totals follow with its next reload.
+      if (selected) out.add('usage')
+      if (thisProject) out.add('tasks').add('projectUsage')
     }
   }
   return out

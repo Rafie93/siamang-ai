@@ -29,6 +29,14 @@ it('allows choosing models on exactly one settings route', () => {
   expect(permitted('POST', '/v0/settings/providers')).toBe(false)
   expect(permitted('POST', '/v0/settings/models/x')).toBe(false)
 })
+it('allows reading tokens and time of a task and a project, and never writing them', () => {
+  expect(permitted('GET', '/v0/tasks/tsk_abc/usage')).toBe(true)
+  expect(permitted('GET', '/v0/projects/prj_a/usage')).toBe(true)
+  expect(permitted('POST', '/v0/tasks/tsk_abc/usage')).toBe(false)
+  expect(permitted('POST', '/v0/projects/prj_a/usage')).toBe(false)
+  expect(permitted('GET', '/v0/projects/prj_a/usage/x')).toBe(false)
+  expect(permitted('GET', '/v0/usage')).toBe(false)
+})
 it('allows dividing the work again, the action behind the Bagi ulang button', () => {
   expect(permitted('POST', '/v0/tasks/tsk_abc/work-division')).toBe(true)
   expect(permitted('GET', '/v0/tasks/tsk_abc/work-division')).toBe(false)

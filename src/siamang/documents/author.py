@@ -16,6 +16,7 @@ from typing import Any
 from siamang.documents.catalog import DocumentStatus, Source, Spec, specs_for
 from siamang.documents.diagrams import diagrams_of
 from siamang.models.errors import ModelError
+import siamang.models.metering as metering
 from siamang.models.request import GenerationOptions, ModelRequest, ResponseFormat
 from siamang.models.router import ModelRouter
 
@@ -183,7 +184,8 @@ def write_batches(router: ModelRouter | None, stage: str, groups: Sequence[Seque
 
     results = {}
     with ThreadPoolExecutor(max_workers=max(1, min(MAX_PARALLEL, len(groups)))) as pool:
-        for future in as_completed([pool.submit(one, g) for g in groups]):
+        # Each part runs in the caller's metering scope, so its model call is counted as the stage's.
+        for future in as_completed([metering.submit(pool, one, g) for g in groups]):
             group, written, started, finished = future.result()
             results[group] = written
             if on_done:

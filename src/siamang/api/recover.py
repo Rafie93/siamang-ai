@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
+import siamang.models.metering as metering
 from siamang.models.errors import ModelError
 from siamang.models.request import GenerationOptions, ModelRequest, ResponseFormat
 from siamang.recovery import Advice, DebtItem, render_debt
@@ -26,8 +27,11 @@ _SCHEMA = {
 ACTIONS = ('change_approach', 'split', 'give_up')
 
 
-def advisor(router, task_text):
-    """``None`` without a model. Any model failure or unusable answer is ``give_up``: the run stops honestly."""
+def advisor(router, task_text, agent='lead'):
+    """``None`` without a model. Any model failure or unusable answer is ``give_up``: the run stops honestly.
+
+    ``agent`` is whose model ``router`` is, so the advice is counted as that agent's work.
+    """
     if router is None:
         return None
 
@@ -38,7 +42,8 @@ def advisor(router, task_text):
             system_prompt=ADVISOR_PROMPT, response_format=ResponseFormat.JSON, json_schema=_SCHEMA,
             options=GenerationOptions(temperature=0), timeout_secs=300, metadata={'purpose': 'recovery_advice'})
         try:
-            data = router.select(request).generate(request).structured_output
+            with metering.activity(agent, 'recovering'):
+                data = router.select(request).generate(request).structured_output
         except ModelError:
             return Advice('give_up')
         if not isinstance(data, Mapping) or data.get('action') not in ACTIONS:

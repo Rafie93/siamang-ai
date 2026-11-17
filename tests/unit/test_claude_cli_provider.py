@@ -62,6 +62,35 @@ def test_generate_isolates_the_session_and_maps_the_result(cli):
     assert kwargs['shell'] is False and kwargs['timeout'] == 10
     assert response.content == 'ok' and response.finish_reason is FinishReason.STOP
     assert response.usage.input_tokens == 510 and response.usage.output_tokens == 4
+    assert response.usage.cache_write_tokens == 500 and response.usage.cache_read_tokens == 8
+
+
+def test_usage_sums_every_model_of_the_call_with_the_cache_as_input(cli):
+    # The shape of a real `claude -p --json-schema` reply: two turns, almost all input read from or written to the cache.
+    cli['stdout'] = reply(modelUsage={
+        'claude-sonnet-5-5': {'inputTokens': 2, 'cacheCreationInputTokens': 1103, 'cacheReadInputTokens': 0,
+                              'outputTokens': 51, 'costUSD': 0.01},
+        'claude-haiku-5-5': {'inputTokens': 10, 'cacheCreationInputTokens': 0, 'cacheReadInputTokens': 90,
+                             'outputTokens': 5}})
+    p, model = provider()
+    usage = p.generate(model, ModelRequest.from_prompt('x')).usage
+    assert (usage.input_tokens, usage.output_tokens, usage.cache_write_tokens, usage.cache_read_tokens) == (1205, 56, 1103, 90)
+
+
+def test_a_failed_call_keeps_the_tokens_it_used(cli):
+    cli['stdout'] = reply(is_error=True, subtype='error_max_structured_output_retries', result='')
+    p, model = provider()
+    with pytest.raises(GenerationError) as caught:
+        p.generate(model, ModelRequest.from_prompt('x'))
+    assert caught.value.usage.input_tokens == 510 and caught.value.usage.output_tokens == 4
+
+
+def test_a_failed_call_with_unreadable_usage_reports_none(cli):
+    cli['stdout'] = reply(is_error=True, result='', usage={'input_tokens': 'many'})
+    p, model = provider()
+    with pytest.raises(GenerationError) as caught:
+        p.generate(model, ModelRequest.from_prompt('x'))
+    assert caught.value.usage is None
 
 
 def test_api_keys_never_reach_the_child(cli, monkeypatch):
@@ -155,6 +184,8 @@ def test_failures_are_typed_and_never_echo_cli_text(cli, fields, code, error):
     (reply(usage={'input_tokens': -1}), 0, GenerationError),
     (reply(modelUsage={}), 0, GenerationError),
     (reply(modelUsage={'claude-haiku-5-5': {}}), 0, GenerationError),
+    (reply(modelUsage={'claude-sonnet-5-5': {'inputTokens': -1, 'cacheCreationInputTokens': 0,
+                                             'cacheReadInputTokens': 0, 'outputTokens': 1}}), 0, GenerationError),
     ('x' * (8 * 1024 * 1024 + 1), 0, GenerationError),
 ])
 def test_does_not_claim_success_for_bad_output(cli, stdout, code, error):

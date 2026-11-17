@@ -5,6 +5,7 @@ import StatusChip from '@/components/StatusChip.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
+import { timeText, tokenCell, tokenTitle } from '@/domain/usage.js'
 import { useOfficeStore } from '@/stores/office'
 
 const office = useOfficeStore()
@@ -38,6 +39,8 @@ const statusItems = computed(() => [
             <th>Tugas</th>
             <th>Status</th>
             <th>Tahap teramati</th>
+            <th class="num">Token</th>
+            <th class="num" title="Waktu run berjalan, tanpa antre dan menunggu Anda">Durasi</th>
             <th />
           </tr>
         </thead>
@@ -53,6 +56,10 @@ const statusItems = computed(() => [
             </td>
             <td><StatusChip :status="t.status" /></td>
             <td style="white-space: nowrap">{{ office.visualStatus(t, office.connected).label }}</td>
+            <td class="num" :title="tokenTitle(t.usage) || undefined">
+              {{ tokenCell(t.usage, 'total_tokens') }}
+            </td>
+            <td class="num">{{ timeText(t.usage?.work_ms) }}</td>
             <td style="text-align: end">
               <AppButton variant="secondary" size="sm" @click="office.choose(t)">
                 Detail <ArrowUpRight :size="14" />

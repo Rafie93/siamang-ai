@@ -52,6 +52,15 @@ def test_ollama_does_not_claim_success_for_bad_responses(data, monkeypatch):
         p.generate(model, ModelRequest.from_prompt('hello'))
 
 
+def test_ollama_reply_from_another_model_keeps_its_tokens(monkeypatch):
+    p, model = provider()
+    monkeypatch.setattr(p, '_request', lambda *a: {'done': True, 'model': 'another', 'message': {'content': 'x'},
+                                                   'prompt_eval_count': 12, 'eval_count': 4})
+    with pytest.raises(GenerationError) as caught:
+        p.generate(model, ModelRequest.from_prompt('hello'))
+    assert caught.value.usage.input_tokens == 12 and caught.value.usage.output_tokens == 4
+
+
 def test_ollama_health_reports_available_models(monkeypatch):
     p, model = provider()
     monkeypatch.setattr(p, '_request', lambda *a: {'models': [{'name': 'test-model'}]})

@@ -53,12 +53,32 @@ Rules, enforced by `tests/unit/test_models_architecture.py`:
 | `ProviderInfo` | `definition.py` | `provider_id`, `type`, `name`, `enabled`. No credential field. |
 | `ProviderHealth` | `definition.py` | `status` (`available`/`degraded`/`unavailable`), `detail`, `available_models` (provider model names, or `None` = not reported), `checked_at`. `degraded` is still usable. |
 | `ModelRequest` | `request.py` | `messages` (`user`/`assistant`; last must be `user`), `request_id` (`mrq_<ULID>` default), optional `model_id`, `required_capabilities`, `system_prompt`, `options` (`temperature`, `max_tokens`, `top_p`, `stop`), `response_format` (`text`/`json`), `json_schema`, `metadata`, `timeout_secs`. `effective_capabilities` = required + `text_generation` (+ `structured_output` for JSON). Invalid input raises `InvalidModelRequestError`. |
-| `ModelResponse` | `response.py` | `request_id`, `provider_id`, `model_id`, `content`, `structured_output`, `finish_reason` (`stop`/`length`/`content_filter`/`tool_call`/`other`), `usage` (`input_tokens`, `output_tokens`, `total_tokens`), `metadata` (`provider_type`, `provider_model`, `duration_ms`), `raw_provider_metadata` (debug only; excluded from `to_dict()`; core must not read it). |
+| `ModelResponse` | `response.py` | `request_id`, `provider_id`, `model_id`, `content`, `structured_output`, `finish_reason` (`stop`/`length`/`content_filter`/`tool_call`/`other`), `usage` (`input_tokens`, `output_tokens`, `total_tokens`, `cache_read_tokens`, `cache_write_tokens`), `metadata` (`provider_type`, `provider_model`, `duration_ms`), `raw_provider_metadata` (debug only; excluded from `to_dict()`; core must not read it). |
 | `ProviderOutput` | `response.py` | What an adapter returns. The base class builds the `ModelResponse`, so IDs cannot be mislabelled. |
 
 `ModelRequest.request_id` identifies one model call. It is **not** the
 contract's `request_id` (the client's submission ID). A future Task Engine may
 record both.
+
+`Usage.input_tokens` is every input token the model read, prompt cache
+included; `cache_read_tokens` and `cache_write_tokens` say how much of it went
+through the cache (`None` when the provider reports no cache). A `ModelError`
+raised after the model ran carries the tokens it still used in `usage`; after
+a timeout nothing is known and it stays `None`.
+
+### Metering (`metering.py`)
+
+Who used a model, for how long, and how many tokens. `generate()` reports every
+call that reached the adapter, failed calls too, through `metering.observe()`.
+A caller opens `metering.scope(sink=..., project_id=..., task_id=..., run_id=...,
+draft_id=...)` and names the agent doing the work with
+`metering.activity(agent, stage, package=...)`, which also records how long that
+work took whether or not it called a model. Outside a scope with a sink nothing
+is recorded, so the layer stays usable on its own. A sink that fails is logged
+and ignored: measuring never breaks the work it measures. A new thread starts
+outside every scope; `metering.submit(pool, fn, ...)` carries the caller's scope
+into a pool. The API runtime's sink writes `api_model_calls` and
+`api_agent_activity` (see `HTTP_API.md`, *Tokens and time*).
 
 ## 3. Provider abstraction (`provider.py`)
 

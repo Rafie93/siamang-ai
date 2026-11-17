@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import ConversationThread from '@/components/ConversationThread.vue'
 import LeadQuestions from '@/components/LeadQuestions.vue'
 import MarkdownText from '@/components/MarkdownText.vue'
+import ProjectUsage from '@/components/ProjectUsage.vue'
 import StatusChip from '@/components/StatusChip.vue'
 import AppAlert from '@/components/ui/AppAlert.vue'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -39,6 +40,7 @@ const tabs = computed(() => [
   { value: 'spec', label: 'Spesifikasi' },
   { value: 'tasks', label: `Task (${office.projectId === id.value ? office.tasks.length : 0})` },
   { value: 'features', label: `Fitur (${project.value?.features.length ?? 0})` },
+  { value: 'usage', label: 'Pemakaian' },
 ])
 
 const stepState = i => {
@@ -224,6 +226,10 @@ const send = async text => {
         </ul>
       </div>
 
+      <div v-else-if="chosen === 'usage'" class="card-body">
+        <ProjectUsage :project-id="project.project_id" />
+      </div>
+
       <div v-else class="card-body">
         <ul v-if="project.features.length" class="plain-list mb">
           <li v-for="f in project.features" :key="f.feature_id">
@@ -250,11 +256,16 @@ const send = async text => {
       </div>
     </section>
 
-    <AppCard v-else>
-      <p>{{ project.description || 'Proyek lokal tanpa repo GitHub.' }}</p>
-      <AppButton variant="secondary" @click="office.openProjectTasks(project)">
-        Buka task <ArrowUpRight :size="14" />
-      </AppButton>
-    </AppCard>
+    <template v-else>
+      <AppCard class="mb">
+        <p>{{ project.description || 'Proyek lokal tanpa repo GitHub.' }}</p>
+        <AppButton variant="secondary" @click="office.openProjectTasks(project)">
+          Buka task <ArrowUpRight :size="14" />
+        </AppButton>
+      </AppCard>
+      <AppCard title="Pemakaian token">
+        <ProjectUsage :project-id="project.project_id" />
+      </AppCard>
+    </template>
   </template>
 </template>

@@ -7,6 +7,7 @@ import LeadQuestions from '@/components/LeadQuestions.vue'
 import MarkdownText from '@/components/MarkdownText.vue'
 import StatusChip from '@/components/StatusChip.vue'
 import TaskTable from '@/components/TaskTable.vue'
+import TaskUsage from '@/components/TaskUsage.vue'
 import AppAlert from '@/components/ui/AppAlert.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
@@ -326,6 +327,8 @@ watch(
         Bagi ulang
       </AppButton>
     </AppAlert>
+
+    <TaskUsage />
 
     <h3 class="section-title">Riwayat tahap</h3>
     <ol v-if="office.events.length" class="timeline">

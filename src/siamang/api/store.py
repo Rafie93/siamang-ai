@@ -40,7 +40,14 @@ WATCHED_WRITES = (
     ('api_project_specs', 'project', 'NEW.project_id', 'NULL', 'NULL', _WRITES),
     ('api_features', 'project', 'NEW.project_id', 'NULL', 'NULL', ('INSERT',)),
     ('projects', 'project', 'NEW.project_id', 'NULL', 'NULL', _WRITES),
+    ('api_model_calls', 'usage', 'NEW.project_id', 'NEW.task_id', 'NULL', ('INSERT',)),  # no task: the intake or a draft
+    ('api_agent_activity', 'usage', 'NEW.project_id', 'NEW.task_id', 'NULL', ('INSERT',)),
 )
+CALL_COLUMNS = ('request_id', 'project_id', 'task_id', 'run_id', 'draft_id', 'agent', 'stage', 'package', 'purpose',
+                'provider_id', 'model_id', 'outcome', 'input_tokens', 'output_tokens', 'cache_read_tokens',
+                'cache_write_tokens', 'started_at', 'finished_at', 'duration_ms')
+ACTIVITY_COLUMNS = ('project_id', 'task_id', 'run_id', 'draft_id', 'agent', 'stage', 'package', 'outcome',
+                    'started_at', 'finished_at', 'duration_ms')
 CHANGE_RETENTION = 10_000  # enough to resume after a dropped connection; further behind, a reader reloads instead
 
 
@@ -57,9 +64,9 @@ class RunStore:
         with self.db.transaction() as conn:
             conn.execute('CREATE TABLE IF NOT EXISTS api_schema (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL) STRICT')
             conn.execute('INSERT OR IGNORE INTO api_schema VALUES (1,1)')
-            if conn.execute('SELECT version FROM api_schema WHERE singleton=1').fetchone()[0] not in (1, 2, 3, 4, 5, 6, 7):
+            if conn.execute('SELECT version FROM api_schema WHERE singleton=1').fetchone()[0] not in (1, 2, 3, 4, 5, 6, 7, 8):
                 raise ValueError('unsupported API schema version')
-            conn.execute('UPDATE api_schema SET version=7 WHERE singleton=1')
+            conn.execute('UPDATE api_schema SET version=8 WHERE singleton=1')
             conn.execute('''CREATE TABLE IF NOT EXISTS api_runs (
                 run_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, state TEXT NOT NULL,
                 phase TEXT NOT NULL, iteration INTEGER, wait_reason TEXT,
@@ -168,6 +175,29 @@ class RunStore:
                 BEFORE DELETE ON api_autonomy_decisions BEGIN SELECT RAISE(ABORT, 'append only'); END''')
             conn.execute('CREATE INDEX IF NOT EXISTS api_project_drafts ON api_task_drafts(project_id, state)')
             conn.execute("UPDATE api_task_drafts SET state='failed', error='interrupted' WHERE state='thinking'")
+            # Schema 8: every model call and every stretch of an agent's work, as it happened. Token counts are NULL when
+            # the provider reported none (a timeout); input counts the prompt cache too.
+            conn.execute('''CREATE TABLE IF NOT EXISTS api_model_calls (
+                position INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT NOT NULL, project_id TEXT NOT NULL,
+                task_id TEXT, run_id TEXT, draft_id TEXT, agent TEXT, stage TEXT, package TEXT, purpose TEXT,
+                provider_id TEXT NOT NULL, model_id TEXT NOT NULL, outcome TEXT NOT NULL,
+                input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER,
+                started_at TEXT NOT NULL, finished_at TEXT NOT NULL, duration_ms INTEGER NOT NULL) STRICT''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS api_agent_activity (
+                position INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, task_id TEXT, run_id TEXT,
+                draft_id TEXT, agent TEXT NOT NULL, stage TEXT NOT NULL, package TEXT, outcome TEXT NOT NULL,
+                started_at TEXT NOT NULL, finished_at TEXT NOT NULL, duration_ms INTEGER NOT NULL) STRICT''')
+            for table in ('api_model_calls', 'api_agent_activity'):
+                for column in ('task_id', 'project_id', 'draft_id'):
+                    conn.execute(f'CREATE INDEX IF NOT EXISTS {table}_{column} ON {table}({column})')
+                conn.execute(f'''CREATE TRIGGER IF NOT EXISTS {table}_no_update
+                    BEFORE UPDATE ON {table} BEGIN SELECT RAISE(ABORT, 'append only'); END''')
+                conn.execute(f'''CREATE TRIGGER IF NOT EXISTS {table}_no_delete
+                    BEFORE DELETE ON {table} BEGIN SELECT RAISE(ABORT, 'append only'); END''')
+            # When recording began: work from before it has no token record, and the reader is told so.
+            conn.execute('CREATE TABLE IF NOT EXISTS api_usage_since (singleton INTEGER PRIMARY KEY CHECK(singleton=1), '
+                         'since TEXT NOT NULL) STRICT')
+            conn.execute('INSERT OR IGNORE INTO api_usage_since VALUES (1, ?)', (now(),))
             self._install_change_log(conn)
 
     @staticmethod
@@ -321,6 +351,25 @@ class RunStore:
                 break
             original = row['previous_content']
         return original
+
+    def record_usage(self, kind, record):
+        """One model call (``call``) or one stretch of an agent's work (``activity``), as metering reported it.
+
+        Its own short transaction: metering reports from whichever thread did the work, never inside another write.
+        A record that belongs to no project cannot be shown to anyone, so it is not kept.
+        """
+        table, columns = {'call': ('api_model_calls', CALL_COLUMNS),
+                          'activity': ('api_agent_activity', ACTIVITY_COLUMNS)}[kind]
+        if not record.get('project_id'):
+            return False
+        with self.db.transaction() as conn:
+            conn.execute(f'INSERT INTO {table}({",".join(columns)}) VALUES ({",".join("?" * len(columns))})',
+                         tuple(record.get(c) for c in columns))
+        return True
+
+    def usage_since(self):
+        row = self.db.conn.execute('SELECT since FROM api_usage_since WHERE singleton=1').fetchone()
+        return row['since'] if row else None
 
     def start_part(self, run_id, stage, part, attempt, kinds, timeout_secs):
         """One model call of a stage has begun. Its row is the evidence of what ran, when, and for how long."""

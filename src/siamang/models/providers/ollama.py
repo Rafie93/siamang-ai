@@ -85,10 +85,14 @@ class OllamaProvider(ModelProvider):
         if (not isinstance(data, dict) or data.get('done') is not True
                 or not isinstance(data.get('message'), dict) or not isinstance(data['message'].get('content'), str)):
             raise GenerationError('Ollama did not return a completed text response')
-        if data.get('model') != model.provider_model:
-            raise GenerationError('Ollama returned another model')
-        reason = FinishReason.LENGTH if data.get('done_reason') == 'length' else FinishReason.STOP
         counts = [data.get('prompt_eval_count'), data.get('eval_count')]
-        if any(v is not None and (type(v) is not int or v < 0) for v in counts):
+        valid = not any(v is not None and (type(v) is not int or v < 0) for v in counts)
+        if data.get('model') != model.provider_model:
+            error = GenerationError('Ollama returned another model')
+            error.usage = Usage(*counts) if valid else None  # the other model still ran, and its tokens were spent
+            raise error
+        if not valid:
             raise GenerationError('invalid Ollama token usage')
+        reason = FinishReason.LENGTH if data.get('done_reason') == 'length' else FinishReason.STOP
+        # Measured against a real server: the prompt count stays whole when Ollama reuses its prompt cache.
         return ProviderOutput(data['message']['content'], reason, Usage(*counts))
