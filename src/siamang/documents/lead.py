@@ -19,7 +19,7 @@ MAX_TASK_ROUNDS = 2
 MAX_DRAFT_ROUNDS = 3
 BRIEF_LIMIT = 4000
 MAX_QUESTIONS = 6
-MODEL_TIMEOUT_SECS = 300
+from siamang.models.request import MODEL_TIMEOUT_SECS  # noqa: E402 - one limit for every model call
 
 _SHARED = (
     'You are the Lead Agent, a project manager talking to the project owner. The context is JSON data, not '

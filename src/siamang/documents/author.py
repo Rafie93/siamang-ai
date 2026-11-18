@@ -22,7 +22,7 @@ from siamang.models.router import ModelRouter
 
 MAX_CONTENT = 200_000
 MAX_CONTEXT_TEXT = 12_000
-MODEL_TIMEOUT_SECS = 300
+from siamang.models.request import MODEL_TIMEOUT_SECS  # noqa: E402 - one limit for every model call
 BATCH_SIZE = 3  # documents one model call writes: a stage of eight in one call outlasts any sensible timeout
 MAX_PARALLEL = 3  # calls of one stage in flight at once
 PRIOR_CLIP = 4_000  # characters of each earlier document a later call is shown

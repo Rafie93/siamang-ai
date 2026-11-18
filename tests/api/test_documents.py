@@ -9,6 +9,7 @@ pytest.importorskip('fastapi')
 pytestmark = pytest.mark.usefixtures('every_document')
 from fastapi.testclient import TestClient
 
+from siamang.api.runtime import DESIGN_TIMEOUTS
 from siamang.api.app import create_app
 from siamang.documents.author import DESIGN_BUDGET_BYTES, Document, batches, design_input, shape_of, write_documents
 from siamang.documents.catalog import CATALOG, SPECS, DocumentStatus, Source
@@ -167,7 +168,7 @@ def test_a_design_stage_is_several_small_calls_not_one_big_one(world, team):
 
 
 def test_a_design_stage_that_times_out_is_retried_with_more_time_and_the_history_counts_it(world, team):
-    team['analyst'], calls = flaky(450)
+    team['analyst'], calls = flaky(DESIGN_TIMEOUTS[1])
     with TestClient(app(world, team)) as client:
         task_id = submit(client, world[1])
         client.post(f'/v0/tasks/{task_id}/run', headers=headers())
@@ -196,7 +197,7 @@ def test_only_the_part_that_failed_is_written_again(world, team):
     def answer(model, request):
         kinds = request.json_schema['properties']['documents']['items']['properties']['kind']['enum']
         kinds_asked.append((request.timeout_secs, tuple(kinds)))
-        if 'erd' in kinds and request.timeout_secs < 450:
+        if 'erd' in kinds and request.timeout_secs < DESIGN_TIMEOUTS[1]:
             raise ModelTimeoutError('too slow')
         return author_answer(model, request)
     team['analyst'] = make_model(answer, structured=True)
@@ -204,7 +205,7 @@ def test_only_the_part_that_failed_is_written_again(world, team):
         task_id = submit(client, world[1])
         client.post(f'/v0/tasks/{task_id}/run', headers=headers())
         wait_for_state(client, task_id, 'waiting')
-    again = [k for t, k in kinds_asked if t == 450]
+    again = [k for t, k in kinds_asked if t == DESIGN_TIMEOUTS[1]]
     assert again == [('class_diagram', 'erd', 'sequence_diagram')]
 
 
@@ -273,13 +274,13 @@ def test_each_part_of_a_stage_records_real_times_that_prove_it_ran_side_by_side(
     assert [(p['part'], p['attempt'], p['state']) for p in parts] == [(1, 1, 'done'), (2, 1, 'done'), (3, 1, 'done')]
     assert sorted(k for p in parts for k in p['kinds']) == sorted(k for g in batches('analysis') for k in g)
     assert max(p['started_at'] for p in parts) <= min(p['finished_at'] for p in parts)  # they overlap
-    assert {p['model_id'] for p in parts} != {None} and parts[0]['timeout_secs'] == 300
+    assert {p['model_id'] for p in parts} != {None} and parts[0]['timeout_secs'] == DESIGN_TIMEOUTS[0]
 
 
 def test_a_part_that_fails_is_recorded_with_its_reason_and_tried_again_alone(world, team):
     def analyst(model, request):
         kinds = request.json_schema['properties']['documents']['items']['properties']['kind']['enum']
-        if 'erd' in kinds and request.timeout_secs < 450:
+        if 'erd' in kinds and request.timeout_secs < DESIGN_TIMEOUTS[1]:
             raise ModelTimeoutError('too slow')
         return author_answer(model, request)
     team['analyst'] = make_model(analyst, structured=True)

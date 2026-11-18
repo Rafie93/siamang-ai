@@ -39,8 +39,15 @@ const office = useOfficeStore()
 const askOpen = ref(false)
 const askAgent = ref('lead')
 const agentTabs = DOCUMENT_AGENTS.map(a => ({ value: a.id, label: a.name }))
+// The server refuses a retry once retry_count reaches max_retries: never offer one it will refuse.
+const retriesLeft = computed(() => {
+  const task = office.selected
+  return task && Number.isInteger(task.max_retries) ? task.max_retries - (task.retry_count || 0) : Infinity
+})
 const canRetry = computed(
-  () => office.selected?.status === 'failed' || (office.stopped && !office.clarificationPending),
+  () =>
+    (office.selected?.status === 'failed' && retriesLeft.value > 0) ||
+    (office.stopped && !office.clarificationPending),
 )
 const stop = computed(() => (office.stopped ? STOP_TEXT[office.selected.execution.wait_reason] : null))
 const questions = computed(() => (office.clarificationPending ? openQuestions(office.taskMessages) : []))
@@ -223,7 +230,12 @@ watch(
           class="mt mb"
           title="Task gagal"
         >
-          {{ failureCause }} Antrekan ulang untuk mencoba dari awal.
+          {{ failureCause }}
+          {{
+            retriesLeft > 0
+              ? 'Antrekan ulang untuk mencoba dari awal.'
+              : `Batas antrean ulang sudah habis (${office.selected.retry_count}/${office.selected.max_retries}). Buat task baru untuk mencoba lagi.`
+          }}
         </AppAlert>
 
         <AppAlert v-if="stop" role="status" tone="warning" class="mt mb" :title="stop.title">{{

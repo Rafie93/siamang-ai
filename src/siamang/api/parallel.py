@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
+from siamang.models.request import MODEL_TIMEOUT_SECS
 from siamang.analyst import AnalysisRequest, SystemAnalyst
 from siamang.analyst.analysis import PLANNED_PATHS, SystemAnalysis
 from siamang.documents.packages import FOUNDATION, WorkPackage, owned, split_owns
@@ -42,7 +43,7 @@ from siamang.tasks import TaskEngine
 from .codec import decode, encode
 from .store import RunStore
 
-PACKAGE_POLICY = ProgrammingPolicy(model_timeout_secs=600, max_context_file_size=64 * 1024, max_context_files=12,
+PACKAGE_POLICY = ProgrammingPolicy(model_timeout_secs=MODEL_TIMEOUT_SECS, max_context_file_size=64 * 1024, max_context_files=12,
                                    max_changes=30)
 PACKAGE_TRIES = 2  # a package that times out is tried again before it is cut in two
 SPLIT_PASSES = 3  # a wave is run again for the halves a timed-out package left, at most this many times

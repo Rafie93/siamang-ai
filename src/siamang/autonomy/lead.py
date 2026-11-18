@@ -30,7 +30,7 @@ ANSWER_CHARS = 600
 DIRECTION_CHARS = 800
 REASON_CHARS = 300
 MIN_QUOTE_CHARS = 15
-MODEL_TIMEOUT_SECS = 300
+from siamang.models.request import MODEL_TIMEOUT_SECS  # noqa: E402 - one limit for every model call
 
 # Never settled by a model, even with a quote: a person answers for these (docs/VISION.md, principle 7).
 _OWNER_ONLY = re.compile(r"\b(biaya|harga|anggaran|budget|cost|pricing|legal|lisensi|license|licence|privasi|privacy|hapus|delete|drop)\b", re.I)

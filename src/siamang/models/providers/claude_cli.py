@@ -23,7 +23,7 @@ from siamang.models.errors import (
     RateLimitedError,
 )
 from siamang.models.provider import ModelProvider
-from siamang.models.request import ResponseFormat
+from siamang.models.request import MODEL_TIMEOUT_SECS, ResponseFormat
 from siamang.models.response import FinishReason, ProviderOutput, Usage
 
 MAX_RESPONSE = 8 * 1024 * 1024
@@ -92,7 +92,7 @@ class ClaudeCliProvider(ModelProvider):
                 args += ['--json-schema', json.dumps(thaw(request.json_schema))]
             else:
                 system += '\n\n' + JSON_ONLY
-        timeout = min(request.timeout_secs or 120, self.timeout_secs or 120, 600)
+        timeout = min(request.timeout_secs or MODEL_TIMEOUT_SECS, self.timeout_secs or MODEL_TIMEOUT_SECS, MODEL_TIMEOUT_SECS)
         # An empty working directory keeps the project's CLAUDE.md and files out of the session.
         with tempfile.TemporaryDirectory(prefix='siamang-claude-') as cwd:
             Path(cwd, 'system.txt').write_text(system, encoding='utf-8')

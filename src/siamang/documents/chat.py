@@ -15,7 +15,7 @@ from siamang.models.errors import GenerationError
 from siamang.models.request import GenerationOptions, ModelRequest, ResponseFormat
 from siamang.models.router import ModelRouter
 
-MODEL_TIMEOUT_SECS = 300
+from siamang.models.request import MODEL_TIMEOUT_SECS  # noqa: E402 - one limit for every model call
 MAX_HISTORY = 20  # earlier turns the agent is shown; older ones fall away
 MAX_REPLY = 8000
 

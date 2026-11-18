@@ -13,6 +13,10 @@ from siamang.models.capabilities import Capability, parse_capabilities
 from siamang.models.definition import freeze_metadata
 from siamang.models.errors import InvalidModelRequestError
 
+# How long one model call may take, at most and by default: 30 minutes. A small local model writing several
+# documents at once can need that long, and a stage that times out only repeats the same wait.
+MODEL_TIMEOUT_SECS = 1800
+
 
 class Role(StrEnum):
     USER = "user"

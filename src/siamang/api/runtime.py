@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 
+from siamang.models.request import MODEL_TIMEOUT_SECS
 from siamang.analyst import AnalysisRequest, SystemAnalyst
 from siamang.approval import ApprovalDecision, ApprovalPolicy, ApprovalRequest, ApprovalService
 from siamang.autonomy import (
@@ -96,7 +97,7 @@ class Resume(Exception):
 
 
 # A real model writes whole files: it needs more time than the default, and to see more than a small file.
-MODEL_POLICY = ProgrammingPolicy(model_timeout_secs=600, max_context_file_size=64 * 1024)
+MODEL_POLICY = ProgrammingPolicy(model_timeout_secs=MODEL_TIMEOUT_SECS, max_context_file_size=64 * 1024)
 
 
 SYSTEM_NOTES = ('From analysis:', 'Not shown to the model:')  # added by the Programmer service, not questions
@@ -116,7 +117,7 @@ FINISHED_PACKAGES = ('passed', 'waiting', 'blocked', 'failed')
 
 
 DESIGN_ATTEMPTS = 3  # a design stage is tried this many times before the run gives up
-DESIGN_TIMEOUTS = (300, 450, 600)  # a model that timed out is given longer on the next try
+DESIGN_TIMEOUTS = (1200, 1500, MODEL_TIMEOUT_SECS)  # a model that timed out is given longer on the next try, up to the limit
 
 
 class DesignFailed(Exception):

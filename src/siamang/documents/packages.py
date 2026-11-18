@@ -23,8 +23,8 @@ MAX_OWNED = 16
 MAX_WAVES = 4
 INSTRUCTIONS_MAX = 1_500
 CONTRACT_MAX = 1_800
-MODEL_TIMEOUT_SECS = 300
-PLAN_TIMEOUTS = (300, 600)  # the division is asked twice; a failure otherwise leaves the whole task with one Programmer
+from siamang.models.request import MODEL_TIMEOUT_SECS  # noqa: E402 - one limit for every model call
+PLAN_TIMEOUTS = (MODEL_TIMEOUT_SECS, MODEL_TIMEOUT_SECS)  # the division is asked twice; a failure otherwise leaves the whole task with one Programmer
 FOUNDATION = 'foundation'
 SPLIT_MAX_OWNED = 40
 TRACKED_SHOWN = 400

@@ -34,7 +34,7 @@ LIMITS: dict[str, tuple[int, int]] = {
     "max_context_file_size": (32 * 1024, 256 * 1024),  # larger files are not shown
     "max_context_bytes": (256 * 1024, 1024 * 1024),  # serialized model context
     "max_model_response": (2 * 1024 * 1024, 8 * 1024 * 1024),  # raw model text accepted for parsing
-    "model_timeout_secs": (120, 600),
+    "model_timeout_secs": (120, 1800),  # the model layer's MODEL_TIMEOUT_SECS: this module must not import it
 }
 
 

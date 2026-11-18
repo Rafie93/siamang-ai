@@ -1,18 +1,62 @@
 """Bounded non-streaming Ollama /api/chat adapter; no SDK or automatic fallback."""
 import ipaddress
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from siamang.jsondata import thaw
 from siamang.models.definition import HealthStatus, ProviderHealth
-from siamang.models.errors import GenerationError, ModelTimeoutError, ProviderUnavailableError
+from siamang.models.errors import (GenerationError, InvalidModelRequestError, ModelTimeoutError,
+                                   ModelUnavailableError, ProviderUnavailableError)
 from siamang.models.provider import ModelProvider
-from siamang.models.request import ResponseFormat
+from siamang.models.request import MODEL_TIMEOUT_SECS, ResponseFormat
 from siamang.models.response import FinishReason, ProviderOutput, Usage
 
 MAX_RESPONSE = 8 * 1024 * 1024
+
+
+def _why(reason):
+    """A short cause such as ``ConnectionRefusedError [Errno 61] Connection refused``: the type and the operating
+    system's own errno text only, never an exception's free text (it may carry what it was given)."""
+    name = type(reason).__name__
+    if isinstance(reason, OSError) and isinstance(reason.errno, int):
+        return f'{name} [Errno {reason.errno}] {os.strerror(reason.errno)}'
+    return name
+
+
+def _error_text(value, depth=0):
+    """The message in ``"text"``, ``{"error": ...}`` or ``{"message": ...}``, also when the text is itself JSON:
+    newer Ollama passes its runner's own error object on as the ``error`` string."""
+    if isinstance(value, str):
+        if depth < 6 and value.lstrip().startswith('{'):
+            try:
+                return _error_text(json.loads(value), depth + 1) or value
+            except ValueError:
+                pass
+        return value
+    if isinstance(value, dict) and depth < 6:
+        for key in ('error', 'message'):
+            found = _error_text(value.get(key), depth + 1)
+            if found:
+                return found
+    return None
+
+
+def _http_error(exc):
+    """Ollama's own error text with the status. 4xx is this request's fault and is not retried."""
+    try:
+        detail = _error_text(json.loads(exc.read(64 * 1024)))
+    except Exception:  # noqa: BLE001 - the status alone still says enough
+        detail = None
+    detail = ' '.join(detail.split())[:300] if isinstance(detail, str) else (exc.reason or '')
+    message = f'Ollama HTTP {exc.code}: {detail}'.rstrip(': ')
+    if exc.code == 404:
+        return ModelUnavailableError(message)
+    if 400 <= exc.code < 500:
+        return InvalidModelRequestError(message)
+    return ProviderUnavailableError(message)
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -52,12 +96,14 @@ class OllamaProvider(ModelProvider):
             return json.loads(data)
         except TimeoutError:
             raise ModelTimeoutError('Ollama request timed out') from None
+        except urllib.error.HTTPError as exc:  # before URLError: Ollama answered, and its answer says why
+            raise _http_error(exc) from None
         except urllib.error.URLError as exc:
             if isinstance(exc.reason, TimeoutError):
                 raise ModelTimeoutError('Ollama request timed out') from None
-            raise ProviderUnavailableError('Ollama request failed') from None
-        except OSError:
-            raise ProviderUnavailableError('Ollama request failed') from None
+            raise ProviderUnavailableError(f'Ollama request failed: {_why(exc.reason)}') from None
+        except OSError as exc:
+            raise ProviderUnavailableError(f'Ollama request failed: {_why(exc)}') from None
         except (UnicodeError, ValueError):
             raise GenerationError('invalid Ollama response') from None
 
@@ -77,10 +123,13 @@ class OllamaProvider(ModelProvider):
             value = getattr(request.options, source, None)
             if value is not None:
                 options[target] = value
+        if model.context_window:
+            # Without num_ctx Ollama loads the model with its own default (4096 tokens) and refuses a longer prompt.
+            options['num_ctx'] = model.context_window
         body = {'model': model.provider_model, 'messages': messages, 'stream': False, 'options': options}
         if request.response_format is ResponseFormat.JSON:
             body['format'] = thaw(request.json_schema) if request.json_schema else 'json'
-        timeout = min(request.timeout_secs or 120, self.timeout_secs or 120, 600)
+        timeout = min(request.timeout_secs or MODEL_TIMEOUT_SECS, self.timeout_secs or MODEL_TIMEOUT_SECS, MODEL_TIMEOUT_SECS)
         data = self._request('/api/chat', body, timeout)
         if (not isinstance(data, dict) or data.get('done') is not True
                 or not isinstance(data.get('message'), dict) or not isinstance(data['message'].get('content'), str)):
